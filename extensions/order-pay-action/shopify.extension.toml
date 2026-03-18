@@ -1,0 +1,19 @@
+api_version = "2026-01"
+
+[[extensions]]
+name = "order-pay-action"
+handle = "order-pay-action"
+type = "ui_extension"
+uid = "a92da5ef-44e5-cecb-38d5-b2a42848e6f1d8118721"
+
+[[extensions.targeting]]
+module = "./src/MenuItemExtension.jsx"
+target = "customer-account.order.action.menu-item.render"
+
+[[extensions.targeting]]
+module = "./src/ActionExtension.jsx"
+target = "customer-account.order.action.render"
+
+[extensions.capabilities]
+api_access = true
+network_access = true
