@@ -1,10 +1,10 @@
 import "@shopify/ui-extensions/preact";
 import { render } from "preact";
-import { useState, useCallback } from "preact/hooks";
+import { useState, useCallback, useEffect } from "preact/hooks";
 import {
-  useOrder,
   useSessionToken,
   useExtension,
+  useApi,
 } from "@shopify/ui-extensions/customer-account/preact";
 
 export default async () => {
@@ -12,55 +12,60 @@ export default async () => {
 };
 
 function ActionExtension() {
-  let order, sessionToken, ext;
+  const sessionToken = useSessionToken();
+  const ext = useExtension();
+  const api = useApi();
 
-  try {
-    order = useOrder();
-    sessionToken = useSessionToken();
-    ext = useExtension();
-  } catch (err) {
-    return (
-      <s-text>Error loading extension: {String(err)}</s-text>
-    );
-  }
+  // The action extension only gives us orderId, not the full order
+  const orderId = api.orderId;
 
-  // Debug: log the order object to understand its structure
-  console.log("order-pay-action: order object", JSON.stringify(order, null, 2));
-
-  if (!order) {
-    return <s-text>Loading order...</s-text>;
-  }
-
-  // Try different possible field names for outstanding amount
-  const outstanding =
-    order.totalOutstandingAmount ||
-    order.outstandingAmount ||
-    order.totalOutstanding;
-
-  const currencyCode = outstanding?.currencyCode || order?.currencyCode || "GBP";
-  const outstandingValue = outstanding?.amount
-    ? parseFloat(outstanding.amount)
-    : 0;
-
-  const [amount, setAmount] = useState(
-    outstandingValue > 0 ? outstandingValue.toFixed(2) : "",
-  );
+  const [amount, setAmount] = useState("");
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
+  const [orderInfo, setOrderInfo] = useState(null);
+
+  // Fetch order details from our backend on mount
+  useEffect(() => {
+    async function fetchOrderInfo() {
+      try {
+        const token = await sessionToken.get();
+        const appUrl = ext.appUrl;
+
+        const response = await fetch(`${appUrl}/api/pay-invoice`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            orderId,
+            action: "get-info",
+          }),
+        });
+
+        const result = await response.json();
+        if (result.order) {
+          setOrderInfo(result.order);
+          const outstanding = result.order.outstandingAmount;
+          if (outstanding) {
+            setAmount(outstanding);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch order info:", err);
+      }
+    }
+
+    if (orderId) {
+      fetchOrderInfo();
+    }
+  }, [orderId]);
 
   const handleSubmit = useCallback(async () => {
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setStatus("error");
       setMessage("Please enter a valid amount greater than 0.");
-      return;
-    }
-
-    if (outstandingValue > 0 && parsedAmount > outstandingValue) {
-      setStatus("error");
-      setMessage(
-        `Amount cannot exceed the outstanding balance of ${currencyCode} ${outstandingValue.toFixed(2)}.`,
-      );
       return;
     }
 
@@ -78,9 +83,10 @@ function ActionExtension() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          orderId: order.id,
+          orderId,
           amount: parsedAmount.toFixed(2),
-          currencyCode,
+          currencyCode: orderInfo?.currencyCode || "GBP",
+          action: "pay",
         }),
       });
 
@@ -90,7 +96,7 @@ function ActionExtension() {
         setStatus("success");
         setMessage(
           result.message ||
-            `Payment of ${currencyCode} ${parsedAmount.toFixed(2)} submitted successfully.`,
+            `Payment of ${parsedAmount.toFixed(2)} submitted successfully.`,
         );
       } else {
         setStatus("error");
@@ -100,7 +106,7 @@ function ActionExtension() {
       setStatus("error");
       setMessage("An unexpected error occurred. Please try again.");
     }
-  }, [amount, outstandingValue, currencyCode, order, sessionToken, ext]);
+  }, [amount, orderId, orderInfo, sessionToken, ext]);
 
   if (status === "success") {
     return (
@@ -118,17 +124,17 @@ function ActionExtension() {
   return (
     <s-block-stack spacing="base">
       <s-heading>Pay Invoice</s-heading>
-      {outstandingValue > 0 ? (
+
+      {orderInfo ? (
         <s-text>
-          Outstanding balance: {currencyCode} {outstandingValue.toFixed(2)}
+          Outstanding balance: {orderInfo.currencyCode} {orderInfo.outstandingAmount}
         </s-text>
       ) : (
-        <s-text>Enter the amount to pay for order {order.name || order.id}</s-text>
+        <s-text>Loading order details...</s-text>
       )}
 
       <s-text-field
         label="Payment amount"
-        type="number"
         value={amount}
         onInput={(e) => setAmount(e.target.value)}
         disabled={status === "loading"}
@@ -145,9 +151,9 @@ function ActionExtension() {
           kind="primary"
           onPress={handleSubmit}
           loading={status === "loading"}
-          disabled={status === "loading"}
+          disabled={status === "loading" || !amount}
         >
-          Pay {currencyCode} {amount || "0.00"}
+          Pay {amount || "0.00"}
         </s-button>
         <s-button
           onPress={() => shopify.customerAccount.close()}

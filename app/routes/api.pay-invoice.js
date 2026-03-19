@@ -8,29 +8,20 @@ export async function action({ request }) {
   let cors = (response) => response;
 
   try {
-    // Validate the customer session token and get CORS helper
     const auth = await authenticate.public.customerAccount(request);
     cors = auth.cors;
 
-    // Extract the shop domain from the session token (dest claim is the shop URL)
     const shopDomain = new URL(auth.sessionToken.dest).hostname;
-
-    // Get Admin API client using the app's offline access token
     const { admin } = await unauthenticated.admin(shopDomain);
 
     const body = await request.clone().json();
-    const { orderId, amount, currencyCode } = body;
+    const { orderId, action: requestAction } = body;
 
-    if (!orderId || !amount || !currencyCode) {
-      return cors(jsonResponse({ error: "Missing required fields: orderId, amount, currencyCode" }, 400));
+    if (!orderId) {
+      return cors(jsonResponse({ error: "Missing orderId" }, 400));
     }
 
-    const parsedAmount = parseFloat(amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return cors(jsonResponse({ error: "Amount must be a positive number" }, 400));
-    }
-
-    // Step 1: Look up the order and its vaulted payment methods
+    // Fetch order details (used by both get-info and pay actions)
     const orderResponse = await admin.graphql(
       `#graphql
       query GetOrderPaymentDetails($orderId: ID!) {
@@ -63,26 +54,49 @@ export async function action({ request }) {
     }
 
     const order = orderData.data.order;
+    const outstandingMoney = order.totalOutstandingSet?.shopMoney;
+
+    // --- GET INFO ---
+    if (requestAction === "get-info") {
+      return cors(jsonResponse({
+        order: {
+          id: order.id,
+          name: order.name,
+          financialStatus: order.displayFinancialStatus,
+          outstandingAmount: outstandingMoney?.amount || "0",
+          currencyCode: outstandingMoney?.currencyCode || "GBP",
+        },
+      }));
+    }
+
+    // --- PAY ---
+    const { amount, currencyCode } = body;
+
+    if (!amount || !currencyCode) {
+      return cors(jsonResponse({ error: "Missing required fields: amount, currencyCode" }, 400));
+    }
+
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return cors(jsonResponse({ error: "Amount must be a positive number" }, 400));
+    }
+
     const vaultedMethods = order.paymentCollectionDetails?.vaultedPaymentMethods || [];
 
     if (vaultedMethods.length === 0) {
       return cors(jsonResponse({ error: "No vaulted payment methods found on this order" }, 400));
     }
 
-    // Use the first vaulted payment method
     const mandateId = vaultedMethods[0].id;
 
-    // Validate amount doesn't exceed outstanding balance
-    const outstandingAmount = parseFloat(
-      order.totalOutstandingSet?.shopMoney?.amount || "0",
-    );
+    const outstandingAmount = parseFloat(outstandingMoney?.amount || "0");
     if (parsedAmount > outstandingAmount) {
       return cors(jsonResponse({
         error: `Amount ${parsedAmount} exceeds outstanding balance of ${outstandingAmount}`,
       }, 400));
     }
 
-    // Step 2: Call orderCreateMandatePayment
+    // Call orderCreateMandatePayment
     const idempotencyKey = crypto.randomUUID();
     const paymentResponse = await admin.graphql(
       `#graphql
@@ -135,11 +149,10 @@ export async function action({ request }) {
       return cors(jsonResponse({ error: "Payment mutation did not return a job" }, 500));
     }
 
-    // Step 3: Poll the job until it resolves (max ~20s)
+    // Poll the job until it resolves
     const jobResult = await pollJob(admin, job.id);
 
     if (jobResult.done) {
-      // Fetch updated order status to confirm
       const updatedOrderResponse = await admin.graphql(
         `#graphql
         query GetUpdatedOrder($orderId: ID!) {
@@ -173,7 +186,6 @@ export async function action({ request }) {
       }));
     }
 
-    // Job didn't finish in time — return pending status
     return cors(jsonResponse({
       success: true,
       message: `Payment submitted but still processing. Job ID: ${job.id}`,
