@@ -206,6 +206,15 @@ export async function action({ request }) {
     }, 202, corsHeaders);
   } catch (error) {
     console.error("Pay invoice error:", error);
+    if (error.graphQLErrors) {
+      console.error("GraphQL errors:", JSON.stringify(error.graphQLErrors, null, 2));
+    }
+    if (error.response) {
+      try {
+        const body = await error.response.json?.();
+        console.error("Error response body:", JSON.stringify(body, null, 2));
+      } catch {}
+    }
     return jsonResponse({ error: "Internal server error" }, 500, corsHeaders);
   }
 }
