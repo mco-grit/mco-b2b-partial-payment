@@ -1,23 +1,4 @@
-import { createAdminApiClient } from "@shopify/admin-api-client";
-
-function getAdminClient() {
-  const store = process.env.SHOPIFY_STORE_DOMAIN;
-  const token = process.env.SHOPIFY_ADMIN_TOKEN;
-  if (!store || !token) {
-    throw new Error("Missing SHOPIFY_STORE_DOMAIN or SHOPIFY_ADMIN_TOKEN env vars");
-  }
-  return createAdminApiClient({
-    storeDomain: store,
-    apiVersion: "2025-10",
-    accessToken: token,
-  });
-}
-
-async function adminGraphql(query, variables = {}) {
-  const client = getAdminClient();
-  const response = await client.request(query, { variables });
-  return response;
-}
+import { authenticate, unauthenticated } from "../shopify.server";
 
 export async function action({ request }) {
   if (request.method !== "POST") {
@@ -33,17 +14,27 @@ export async function action({ request }) {
   };
 
   try {
-    const body = await request.json();
+    // Validate customer session token
+    const auth = await authenticate.public.customerAccount(request);
+
+    // Get shop domain from session token
+    const dest = auth.sessionToken.dest;
+    const shopDomain = dest.includes("://") ? new URL(dest).hostname : dest;
+
+    // Get Admin API client using the app's offline access token (stored in PostgreSQL)
+    const { admin } = await unauthenticated.admin(shopDomain);
+
+    const body = await request.clone().json();
     const { orderId, action: requestAction } = body;
 
     if (!orderId) {
       return jsonResponse({ error: "Missing orderId" }, 400, corsHeaders);
     }
 
-    console.log("Pay invoice request:", { orderId, action: requestAction });
+    console.log("Pay invoice request:", { orderId, action: requestAction, shop: shopDomain });
 
     // Fetch order details
-    const orderData = await adminGraphql(
+    const orderResponse = await admin.graphql(
       `#graphql
       query GetOrderPaymentDetails($orderId: ID!) {
         order(id: $orderId) {
@@ -65,9 +56,10 @@ export async function action({ request }) {
           }
         }
       }`,
-      { orderId },
+      { variables: { orderId } },
     );
 
+    const orderData = await orderResponse.json();
     console.log("Order API response:", JSON.stringify(orderData, null, 2));
 
     if (orderData.data?.order == null) {
@@ -119,7 +111,7 @@ export async function action({ request }) {
 
     // Call orderCreateMandatePayment
     const idempotencyKey = crypto.randomUUID();
-    const paymentData = await adminGraphql(
+    const paymentResponse = await admin.graphql(
       `#graphql
       mutation OrderCreateMandatePayment(
         $orderId: ID!
@@ -145,16 +137,19 @@ export async function action({ request }) {
         }
       }`,
       {
-        orderId,
-        mandateId,
-        idempotencyKey,
-        amount: {
-          amount: parsedAmount.toFixed(2),
-          currencyCode,
+        variables: {
+          orderId,
+          mandateId,
+          idempotencyKey,
+          amount: {
+            amount: parsedAmount.toFixed(2),
+            currencyCode,
+          },
         },
       },
     );
 
+    const paymentData = await paymentResponse.json();
     const mutation = paymentData.data?.orderCreateMandatePayment;
 
     if (mutation?.userErrors?.length > 0) {
@@ -168,10 +163,10 @@ export async function action({ request }) {
     }
 
     // Poll the job until it resolves
-    const jobResult = await pollJob(job.id);
+    const jobResult = await pollJob(admin, job.id);
 
     if (jobResult.done) {
-      const updatedOrderData = await adminGraphql(
+      const updatedOrderResponse = await admin.graphql(
         `#graphql
         query GetUpdatedOrder($orderId: ID!) {
           order(id: $orderId) {
@@ -186,9 +181,10 @@ export async function action({ request }) {
             }
           }
         }`,
-        { orderId },
+        { variables: { orderId } },
       );
 
+      const updatedOrderData = await updatedOrderResponse.json();
       const updatedOrder = updatedOrderData.data?.order;
 
       return jsonResponse({
@@ -234,11 +230,11 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
   });
 }
 
-async function pollJob(jobId, maxAttempts = 10, delayMs = 2000) {
+async function pollJob(admin, jobId, maxAttempts = 10, delayMs = 2000) {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((resolve) => setTimeout(resolve, delayMs));
 
-    const data = await adminGraphql(
+    const response = await admin.graphql(
       `#graphql
       query GetJob($jobId: ID!) {
         job(id: $jobId) {
@@ -251,9 +247,10 @@ async function pollJob(jobId, maxAttempts = 10, delayMs = 2000) {
           }
         }
       }`,
-      { jobId },
+      { variables: { jobId } },
     );
 
+    const data = await response.json();
     const job = data.data?.job;
 
     if (!job) {
