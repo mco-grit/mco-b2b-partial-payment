@@ -1,5 +1,3 @@
-import { authenticate } from "../shopify.server";
-import "@shopify/shopify-api/adapters/node";
 import { createAdminApiClient } from "@shopify/admin-api-client";
 
 function getAdminClient() {
