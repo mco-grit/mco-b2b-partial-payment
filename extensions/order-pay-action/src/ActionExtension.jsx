@@ -2,9 +2,9 @@ import "@shopify/ui-extensions/preact";
 import { render } from "preact";
 import { useState, useCallback, useEffect } from "preact/hooks";
 import {
+  useOrder,
   useSessionToken,
   useExtension,
-  useApi,
 } from "@shopify/ui-extensions/customer-account/preact";
 
 export default async () => {
@@ -12,19 +12,17 @@ export default async () => {
 };
 
 function ActionExtension() {
+  const order = useOrder();
   const sessionToken = useSessionToken();
   const ext = useExtension();
-  const api = useApi();
 
-  // The action extension only gives us orderId, not the full order
-  const orderId = api.orderId;
+  const orderId = order?.id;
 
   const [amount, setAmount] = useState("");
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
   const [orderInfo, setOrderInfo] = useState(null);
 
-  // Fetch order details from our backend on mount
   useEffect(() => {
     async function fetchOrderInfo() {
       try {
@@ -46,13 +44,14 @@ function ActionExtension() {
         const result = await response.json();
         if (result.order) {
           setOrderInfo(result.order);
-          const outstanding = result.order.outstandingAmount;
-          if (outstanding) {
-            setAmount(outstanding);
+          if (parseFloat(result.order.outstandingAmount) > 0) {
+            setAmount(result.order.outstandingAmount);
           }
         }
       } catch (err) {
         console.error("Failed to fetch order info:", err);
+        setMessage("Failed to load order details.");
+        setStatus("error");
       }
     }
 
@@ -108,21 +107,27 @@ function ActionExtension() {
     }
   }, [amount, orderId, orderInfo, sessionToken, ext]);
 
+  if (!orderId) {
+    return <s-text>Loading...</s-text>;
+  }
+
   if (status === "success") {
     return (
-      <s-block-stack spacing="base">
+      <s-card>
         <s-banner status="success">
           <s-text>{message}</s-text>
         </s-banner>
-        <s-button onPress={() => shopify.customerAccount.close()}>
-          Done
-        </s-button>
-      </s-block-stack>
+      </s-card>
     );
   }
 
+  // Don't show the payment block if no outstanding balance
+  if (orderInfo && parseFloat(orderInfo.outstandingAmount) <= 0) {
+    return null;
+  }
+
   return (
-    <s-block-stack spacing="base">
+    <s-card>
       <s-heading>Pay Invoice</s-heading>
 
       {orderInfo ? (
@@ -146,22 +151,14 @@ function ActionExtension() {
         </s-banner>
       )}
 
-      <s-inline-stack spacing="base">
-        <s-button
-          kind="primary"
-          onPress={handleSubmit}
-          loading={status === "loading"}
-          disabled={status === "loading" || !amount}
-        >
-          Pay {amount || "0.00"}
-        </s-button>
-        <s-button
-          onPress={() => shopify.customerAccount.close()}
-          disabled={status === "loading"}
-        >
-          Cancel
-        </s-button>
-      </s-inline-stack>
-    </s-block-stack>
+      <s-button
+        kind="primary"
+        onPress={handleSubmit}
+        loading={status === "loading"}
+        disabled={status === "loading" || !amount}
+      >
+        Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
+      </s-button>
+    </s-card>
   );
 }
