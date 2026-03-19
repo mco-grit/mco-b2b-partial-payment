@@ -2,13 +2,13 @@ import "@shopify/ui-extensions/preact";
 import { render } from "preact";
 
 export default async () => {
-  render(<ActionExtension />, document.body);
+  render(<Extension />, document.body);
 };
 
-function ActionExtension() {
+function Extension() {
   return (
-    <s-card>
-      <s-text>Pay Invoice extension loaded successfully.</s-text>
-    </s-card>
+    <s-banner>
+      <s-text>Pay Invoice extension loaded</s-text>
+    </s-banner>
   );
 }
