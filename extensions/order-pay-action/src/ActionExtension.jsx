@@ -28,7 +28,7 @@ function ActionExtension() {
     async function fetchOrderInfo() {
       try {
         const token = await sessionToken.get();
-        const appUrl = ext.appUrl;
+        const appUrl = "https://mco-b2b-partial-payment.onrender.com";
 
         const response = await fetch(`${appUrl}/api/pay-invoice`, {
           method: "POST",
@@ -74,7 +74,7 @@ function ActionExtension() {
 
     try {
       const token = await sessionToken.get();
-      const appUrl = ext.appUrl;
+      const appUrl = "https://mco-b2b-partial-payment.onrender.com";
 
       const response = await fetch(`${appUrl}/api/pay-invoice`, {
         method: "POST",
