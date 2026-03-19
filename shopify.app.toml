@@ -2,7 +2,7 @@
 
 client_id = "3cbdcaf4ce72d5015d404c520de51502"
 name = "b2b-partial-pay"
-application_url = "https://example.com"
+application_url = "https://mco-b2b-partial-payment.onrender.com"
 embedded = true
 
 [build]
@@ -24,4 +24,4 @@ api_version = "2026-04"
 scopes = "write_products,read_orders,write_orders"
 
 [auth]
-redirect_urls = [ "https://example.com/api/auth" ]
+redirect_urls = [ "https://mco-b2b-partial-payment.onrender.com/api/auth" ]
