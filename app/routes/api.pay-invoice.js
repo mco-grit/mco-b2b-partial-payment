@@ -11,7 +11,8 @@ export async function action({ request }) {
     const auth = await authenticate.public.customerAccount(request);
     cors = auth.cors;
 
-    const shopDomain = new URL(auth.sessionToken.dest).hostname;
+    const dest = auth.sessionToken.dest;
+    const shopDomain = dest.includes("://") ? new URL(dest).hostname : dest;
     const { admin } = await unauthenticated.admin(shopDomain);
 
     const body = await request.clone().json();
