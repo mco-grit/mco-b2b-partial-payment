@@ -8,7 +8,7 @@ function getAdminClient() {
   }
   return createAdminApiClient({
     storeDomain: store,
-    apiVersion: "2025-01",
+    apiVersion: "2025-10",
     accessToken: token,
   });
 }
@@ -40,6 +40,8 @@ export async function action({ request }) {
       return jsonResponse({ error: "Missing orderId" }, 400, corsHeaders);
     }
 
+    console.log("Pay invoice request:", { orderId, action: requestAction });
+
     // Fetch order details
     const orderData = await adminGraphql(
       `#graphql
@@ -65,6 +67,8 @@ export async function action({ request }) {
       }`,
       { orderId },
     );
+
+    console.log("Order API response:", JSON.stringify(orderData, null, 2));
 
     if (orderData.data?.order == null) {
       return jsonResponse({ error: "Order not found" }, 404, corsHeaders);
