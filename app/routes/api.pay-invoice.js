@@ -106,8 +106,6 @@ export async function action({ request }) {
             paymentCollectionDetails {
               vaultedPaymentMethods {
                 id
-                name
-                paymentMethodId
               }
             }
           }
