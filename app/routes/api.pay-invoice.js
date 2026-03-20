@@ -280,11 +280,6 @@ async function pollJob(admin, jobId, maxAttempts = 10, delayMs = 2000) {
         job(id: $jobId) {
           id
           done
-          errors {
-            code
-            field
-            message
-          }
         }
       }`,
       { variables: { jobId } },
@@ -298,11 +293,6 @@ async function pollJob(admin, jobId, maxAttempts = 10, delayMs = 2000) {
     }
 
     if (job.done) {
-      if (job.errors?.length > 0) {
-        throw new Error(
-          `Job completed with errors: ${job.errors.map((e) => e.message).join("; ")}`,
-        );
-      }
       return { done: true };
     }
   }
