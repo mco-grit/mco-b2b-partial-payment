@@ -96,7 +96,31 @@ export async function action({ request }) {
       return jsonResponse({ error: "Amount must be a positive number" }, 400, corsHeaders);
     }
 
-    const vaultedMethods = order.paymentCollectionDetails?.vaultedPaymentMethods || [];
+    // Fetch vaulted payment methods separately
+    let vaultedMethods = [];
+    try {
+      const vaultedResponse = await admin.graphql(
+        `#graphql
+        query GetVaultedPaymentMethods($orderId: ID!) {
+          order(id: $orderId) {
+            paymentCollectionDetails {
+              vaultedPaymentMethods {
+                id
+                name
+                paymentMethodId
+              }
+            }
+          }
+        }`,
+        { variables: { orderId } },
+      );
+      const vaultedData = await vaultedResponse.json();
+      vaultedMethods = vaultedData.data?.order?.paymentCollectionDetails?.vaultedPaymentMethods || [];
+      console.log("Vaulted payment methods:", JSON.stringify(vaultedMethods, null, 2));
+    } catch (vaultedError) {
+      console.error("Vaulted payment methods query error:", vaultedError.message);
+      return jsonResponse({ error: `Could not fetch payment methods: ${vaultedError.message}` }, 500, corsHeaders);
+    }
 
     if (vaultedMethods.length === 0) {
       return jsonResponse({ error: "No vaulted payment methods found on this order" }, 400, corsHeaders);
@@ -113,45 +137,51 @@ export async function action({ request }) {
 
     // Call orderCreateMandatePayment
     const idempotencyKey = crypto.randomUUID();
-    const paymentResponse = await admin.graphql(
-      `#graphql
-      mutation OrderCreateMandatePayment(
-        $orderId: ID!
-        $mandateId: ID!
-        $amount: MoneyInput!
-        $idempotencyKey: String!
-      ) {
-        orderCreateMandatePayment(
-          orderId: $orderId
-          mandateId: $mandateId
-          idempotencyKey: $idempotencyKey
-          amount: $amount
-          autoCapture: true
+    let paymentData;
+    try {
+      const paymentResponse = await admin.graphql(
+        `#graphql
+        mutation OrderCreateMandatePayment(
+          $orderId: ID!
+          $mandateId: ID!
+          $amount: MoneyInput!
+          $idempotencyKey: String!
         ) {
-          job {
-            id
-            done
+          orderCreateMandatePayment(
+            orderId: $orderId
+            mandateId: $mandateId
+            idempotencyKey: $idempotencyKey
+            amount: $amount
+            autoCapture: true
+          ) {
+            job {
+              id
+              done
+            }
+            userErrors {
+              field
+              message
+            }
           }
-          userErrors {
-            field
-            message
-          }
-        }
-      }`,
-      {
-        variables: {
-          orderId,
-          mandateId,
-          idempotencyKey,
-          amount: {
-            amount: parsedAmount.toFixed(2),
-            currencyCode,
+        }`,
+        {
+          variables: {
+            orderId,
+            mandateId,
+            idempotencyKey,
+            amount: {
+              amount: parsedAmount.toFixed(2),
+              currencyCode,
+            },
           },
         },
-      },
-    );
+      );
+      paymentData = await paymentResponse.json();
+    } catch (payError) {
+      console.error("Payment mutation error:", payError.message);
+      return jsonResponse({ error: `Payment mutation failed: ${payError.message}` }, 500, corsHeaders);
+    }
 
-    const paymentData = await paymentResponse.json();
     const mutation = paymentData.data?.orderCreateMandatePayment;
 
     if (mutation?.userErrors?.length > 0) {
