@@ -153,6 +153,7 @@ function ActionExtension() {
 
       <s-button
         kind="primary"
+        onClick={handleSubmit}
         onPress={handleSubmit}
         loading={status === "loading"}
         disabled={status === "loading" || !amount}
