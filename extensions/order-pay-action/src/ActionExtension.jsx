@@ -1,11 +1,13 @@
 import "@shopify/ui-extensions/preact";
 import { render } from "preact";
-import { useState, useCallback, useEffect } from "preact/hooks";
+import { useState, useCallback, useEffect, useRef } from "preact/hooks";
 import {
   useOrder,
   useSessionToken,
   useExtension,
 } from "@shopify/ui-extensions/customer-account/preact";
+
+const APP_URL = "https://mco-b2b-partial-payment.onrender.com";
 
 export default async () => {
   render(<ActionExtension />, document.body);
@@ -17,6 +19,7 @@ function ActionExtension() {
   const ext = useExtension();
 
   const orderId = order?.id;
+  const submitting = useRef(false);
 
   const [amount, setAmount] = useState("");
   const [status, setStatus] = useState("idle");
@@ -28,9 +31,8 @@ function ActionExtension() {
     async function fetchOrderInfo() {
       try {
         const token = await sessionToken.get();
-        const appUrl = "https://mco-b2b-partial-payment.onrender.com";
 
-        const response = await fetch(`${appUrl}/api/pay-invoice`, {
+        const response = await fetch(`${APP_URL}/api/pay-invoice`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -62,10 +64,25 @@ function ActionExtension() {
   }, [orderId]);
 
   const handleSubmit = useCallback(async () => {
+    // Prevent double submission
+    if (submitting.current) return;
+    submitting.current = true;
+
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setStatus("error");
       setMessage("Please enter a valid amount greater than 0.");
+      submitting.current = false;
+      return;
+    }
+
+    const outstanding = parseFloat(orderInfo?.outstandingAmount || "0");
+    if (parsedAmount > outstanding) {
+      setStatus("error");
+      setMessage(
+        `Amount cannot exceed outstanding balance of ${orderInfo?.currencyCode} ${outstanding.toFixed(2)}.`,
+      );
+      submitting.current = false;
       return;
     }
 
@@ -74,9 +91,8 @@ function ActionExtension() {
 
     try {
       const token = await sessionToken.get();
-      const appUrl = "https://mco-b2b-partial-payment.onrender.com";
 
-      const response = await fetch(`${appUrl}/api/pay-invoice`, {
+      const response = await fetch(`${APP_URL}/api/pay-invoice`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -98,15 +114,24 @@ function ActionExtension() {
           result.message ||
             `Payment of ${parsedAmount.toFixed(2)} submitted successfully.`,
         );
+        // Update displayed balance
+        if (result.order?.remainingBalance) {
+          setOrderInfo((prev) => ({
+            ...prev,
+            outstandingAmount: result.order.remainingBalance.amount,
+          }));
+        }
       } else {
         setStatus("error");
         setMessage(result.error || "Payment failed. Please try again.");
+        submitting.current = false;
       }
     } catch (err) {
       setStatus("error");
       setMessage("An unexpected error occurred. Please try again.");
+      submitting.current = false;
     }
-  }, [amount, orderId, orderInfo, sessionToken, ext]);
+  }, [amount, orderId, orderInfo, sessionToken]);
 
   // Don't show anything while loading
   if (loading) {
@@ -120,9 +145,17 @@ function ActionExtension() {
 
   if (status === "success") {
     return (
-      <s-banner status="success">
-        <s-text>{message}</s-text>
-      </s-banner>
+      <s-section>
+        <s-banner status="success">
+          <s-text>{message}</s-text>
+        </s-banner>
+        {orderInfo && parseFloat(orderInfo.outstandingAmount) > 0 && (
+          <s-text>
+            Remaining balance: {orderInfo.currencyCode}{" "}
+            {orderInfo.outstandingAmount}
+          </s-text>
+        )}
+      </s-section>
     );
   }
 
@@ -132,7 +165,8 @@ function ActionExtension() {
 
       {orderInfo ? (
         <s-text>
-          Outstanding balance: {orderInfo.currencyCode} {orderInfo.outstandingAmount}
+          Outstanding balance: {orderInfo.currencyCode}{" "}
+          {orderInfo.outstandingAmount}
         </s-text>
       ) : (
         <s-text>Could not load order details.</s-text>
