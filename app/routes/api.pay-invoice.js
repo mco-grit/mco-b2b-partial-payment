@@ -134,6 +134,7 @@ export async function action({ request }) {
     }
 
     // Call orderCreateMandatePayment
+    console.log("Payment details:", { orderId, mandateId, parsedAmount, currencyCode });
     const idempotencyKey = crypto.randomUUID();
     let paymentData;
     try {
@@ -147,7 +148,7 @@ export async function action({ request }) {
         ) {
           orderCreateMandatePayment(
             id: $id
-            paymentMandateId: $mandateId
+            mandateId: $mandateId
             idempotencyKey: $idempotencyKey
             amount: $amount
             autoCapture: true
