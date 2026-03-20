@@ -33,34 +33,36 @@ export async function action({ request }) {
 
     console.log("Pay invoice request:", { orderId, action: requestAction, shop: shopDomain });
 
-    // Fetch order details
-    const orderResponse = await admin.graphql(
-      `#graphql
-      query GetOrderPaymentDetails($orderId: ID!) {
-        order(id: $orderId) {
-          id
-          name
-          displayFinancialStatus
-          totalOutstandingSet {
-            shopMoney {
-              amount
-              currencyCode
+    // Fetch order details - start with a simple query to test
+    let orderData;
+    try {
+      const orderResponse = await admin.graphql(
+        `#graphql
+        query GetOrderPaymentDetails($orderId: ID!) {
+          order(id: $orderId) {
+            id
+            name
+            displayFinancialStatus
+            totalOutstandingSet {
+              shopMoney {
+                amount
+                currencyCode
+              }
             }
           }
-          paymentCollectionDetails {
-            vaultedPaymentMethods {
-              id
-              name
-              paymentMethodId
-            }
-          }
-        }
-      }`,
-      { variables: { orderId } },
-    );
-
-    const orderData = await orderResponse.json();
-    console.log("Order API response:", JSON.stringify(orderData, null, 2));
+        }`,
+        { variables: { orderId } },
+      );
+      orderData = await orderResponse.json();
+      console.log("Order API response:", JSON.stringify(orderData, null, 2));
+    } catch (gqlError) {
+      console.error("GraphQL query error:", gqlError.message);
+      console.error("GraphQL error details:", JSON.stringify({
+        graphQLErrors: gqlError.body?.errors,
+        response: gqlError.response?.status,
+      }, null, 2));
+      return jsonResponse({ error: `GraphQL error: ${gqlError.message}` }, 500, corsHeaders);
+    }
 
     if (orderData.data?.order == null) {
       return jsonResponse({ error: "Order not found" }, 404, corsHeaders);
