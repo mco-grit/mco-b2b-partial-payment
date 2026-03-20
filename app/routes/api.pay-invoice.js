@@ -135,7 +135,7 @@ export async function action({ request }) {
 
     // Call orderCreateMandatePayment
     console.log("Payment details:", { orderId, mandateId, parsedAmount, currencyCode });
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = crypto.randomUUID().replace(/-/g, "").slice(0, 32);
     let paymentData;
     try {
       const paymentResponse = await admin.graphql(
