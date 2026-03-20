@@ -140,14 +140,14 @@ export async function action({ request }) {
       const paymentResponse = await admin.graphql(
         `#graphql
         mutation OrderCreateMandatePayment(
-          $orderId: ID!
+          $id: ID!
           $mandateId: ID!
           $amount: MoneyInput!
           $idempotencyKey: String!
         ) {
           orderCreateMandatePayment(
-            orderId: $orderId
-            mandateId: $mandateId
+            id: $id
+            paymentMandateId: $mandateId
             idempotencyKey: $idempotencyKey
             amount: $amount
             autoCapture: true
@@ -164,7 +164,7 @@ export async function action({ request }) {
         }`,
         {
           variables: {
-            orderId,
+            id: orderId,
             mandateId,
             idempotencyKey,
             amount: {
