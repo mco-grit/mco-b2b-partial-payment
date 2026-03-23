@@ -1,4 +1,4 @@
-import { authenticate, unauthenticated } from "../shopify.server";
+import { unauthenticated } from "../shopify.server";
 
 export async function loader({ request }) {
   const shop = "avon-prod.myshopify.com";
