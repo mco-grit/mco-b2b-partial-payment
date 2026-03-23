@@ -110,6 +110,124 @@ All emails are configurable in Settings → Notifications.
 
 ---
 
+## Test 2: API-Created Orders (ISL Late Payment Fee Simulation)
+
+**Goal:** Validate that `orderCreateMandatePayment` works on orders created purely via API — no checkout, no invoice flow. This simulates how ISL would create late payment fee orders.
+
+**Reference:** [Shopify community thread on mandate payments for payment-pending orders](https://community.shopify.dev/t/testing-paymentmandates-to-pay-for-created-payment-pending-orders/31955)
+
+### Steps performed
+
+1. **Created a draft order** via `draftOrderCreate` with `purchasingEntity` assigning it to Lak LLC's CompanyLocation. No payment terms set (API has a gap — requires `issueDate` but the field doesn't exist on the input type).
+
+2. **Completed the draft** with `draftOrderComplete(paymentPending: true)` — created Order #1171, status `PENDING`, £5.00 outstanding.
+
+3. **Queried `paymentCollectionDetails.vaultedPaymentMethods`** on the new order — **the vaulted card was returned** (same mandate ID as checkout-created orders).
+
+4. **Called `orderCreateMandatePayment`** with a partial amount of £3.00 — **succeeded**, Job returned with no errors.
+
+### Key findings
+
+- **API-created orders work with mandate payments** — no checkout or invoice flow needed
+- **Vaulted card is resolved from the CompanyLocation level**, not the order level. As long as the order is assigned to a CompanyLocation that has a customer with a vaulted card, the mandate is available regardless of how the order was created.
+- **The community thread concern is not a problem for B2B.** The thread warns that draft-order-originated orders won't have vaulted payment methods because vault attachment happens during checkout. This is true for D2C orders, but **B2B mandates are resolved from the CompanyLocation**, not from checkout history.
+- **Payment terms gap:** `draftOrderCreate` requires an `issueDate` for net payment terms but the input type doesn't accept it. Workaround: create without payment terms and use `paymentPending: true` on `draftOrderComplete`.
+
+### Working GraphQL mutations for API-created order flow
+
+```graphql
+# Step 1: Find Company, Location, Contact IDs
+{
+  companies(first: 5, query: "Company Name") {
+    edges {
+      node {
+        id
+        name
+        locations(first: 5) {
+          edges { node { id name } }
+        }
+      }
+    }
+  }
+}
+
+{
+  companyLocation(id: "gid://shopify/CompanyLocation/XXX") {
+    roleAssignments(first: 10) {
+      edges {
+        node {
+          companyContact {
+            id
+            customer { email }
+          }
+        }
+      }
+    }
+  }
+}
+
+# Step 2: Create draft order
+mutation {
+  draftOrderCreate(input: {
+    lineItems: [{ title: "Late Payment Fee", originalUnitPrice: "5.00", quantity: 1 }]
+    purchasingEntity: {
+      purchasingCompany: {
+        companyId: "gid://shopify/Company/XXX"
+        companyLocationId: "gid://shopify/CompanyLocation/XXX"
+        companyContactId: "gid://shopify/CompanyContact/XXX"
+      }
+    }
+  }) {
+    draftOrder { id name }
+    userErrors { field message }
+  }
+}
+
+# Step 3: Complete with payment pending
+mutation {
+  draftOrderComplete(id: "gid://shopify/DraftOrder/XXX", paymentPending: true) {
+    draftOrder {
+      order {
+        id name displayFinancialStatus
+        totalOutstandingSet { shopMoney { amount currencyCode } }
+      }
+    }
+    userErrors { field message }
+  }
+}
+
+# Step 4: Query vaulted payment methods
+{
+  order(id: "gid://shopify/Order/XXX") {
+    paymentCollectionDetails { vaultedPaymentMethods { id } }
+  }
+}
+
+# Step 5: Create mandate payment
+mutation {
+  orderCreateMandatePayment(
+    id: "gid://shopify/Order/XXX"
+    mandateId: "gid://shopify/PaymentMandate/XXX"
+    idempotencyKey: "unique-key-max-32-chars"
+    amount: { amount: "3.00", currencyCode: GBP }
+    autoCapture: true
+  ) {
+    job { id done }
+    userErrors { field message }
+  }
+}
+
+# Step 6: Verify
+{
+  order(id: "gid://shopify/Order/XXX") {
+    id name displayFinancialStatus
+    totalOutstandingSet { shopMoney { amount currencyCode } }
+  }
+}
+```
+
+---
+
 ## Architecture notes for MVP
 
 ### Required scopes
