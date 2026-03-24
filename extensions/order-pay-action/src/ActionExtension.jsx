@@ -195,9 +195,9 @@ function ActionExtension() {
           {paymentMethods
             .filter((m) => !m.expired)
             .map((m) => (
-              <option key={m.id} value={m.id}>
+              <s-option key={m.id} value={m.id}>
                 {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
-              </option>
+              </s-option>
             ))}
         </s-select>
       )}
