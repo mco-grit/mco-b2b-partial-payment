@@ -73,6 +73,47 @@ export async function action({ request }) {
 
     // --- GET INFO ---
     if (requestAction === "get-info") {
+      // Also fetch vaulted payment methods with card details
+      let paymentMethods = [];
+      try {
+        const vaultedResponse = await admin.graphql(
+          `#graphql
+          query GetVaultedPaymentMethods($orderId: ID!) {
+            order(id: $orderId) {
+              paymentCollectionDetails {
+                vaultedPaymentMethods {
+                  id
+                  paymentInstrument {
+                    ... on VaultCreditCard {
+                      brand
+                      lastDigits
+                      name
+                      expiryMonth
+                      expiryYear
+                      expired
+                    }
+                  }
+                }
+              }
+            }
+          }`,
+          { variables: { orderId } },
+        );
+        const vaultedData = await vaultedResponse.json();
+        paymentMethods = (vaultedData.data?.order?.paymentCollectionDetails?.vaultedPaymentMethods || [])
+          .map((m) => ({
+            id: m.id,
+            brand: m.paymentInstrument?.brand,
+            lastDigits: m.paymentInstrument?.lastDigits,
+            name: m.paymentInstrument?.name,
+            expiryMonth: m.paymentInstrument?.expiryMonth,
+            expiryYear: m.paymentInstrument?.expiryYear,
+            expired: m.paymentInstrument?.expired,
+          }));
+      } catch (e) {
+        console.error("Failed to fetch payment methods in get-info:", e.message);
+      }
+
       return jsonResponse({
         order: {
           id: order.id,
@@ -80,12 +121,13 @@ export async function action({ request }) {
           financialStatus: order.displayFinancialStatus,
           outstandingAmount: outstandingMoney?.amount || "0",
           currencyCode: outstandingMoney?.currencyCode || "GBP",
+          paymentMethods,
         },
       }, 200, corsHeaders);
     }
 
     // --- PAY ---
-    const { amount, currencyCode } = body;
+    const { amount, currencyCode, mandateId: selectedMandateId } = body;
 
     if (!amount || !currencyCode) {
       return jsonResponse({ error: "Missing required fields: amount, currencyCode" }, 400, corsHeaders);
@@ -124,7 +166,9 @@ export async function action({ request }) {
       return jsonResponse({ error: "No vaulted payment methods found on this order" }, 400, corsHeaders);
     }
 
-    const mandateId = vaultedMethods[0].id;
+    // Use selected mandate from frontend, or fall back to first one
+    const mandateId = selectedMandateId || vaultedMethods[0].id;
+    console.log("Using mandate:", mandateId);
 
     const outstandingAmount = parseFloat(outstandingMoney?.amount || "0");
     if (parsedAmount > outstandingAmount) {

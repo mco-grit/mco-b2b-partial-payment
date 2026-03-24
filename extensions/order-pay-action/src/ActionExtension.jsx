@@ -26,6 +26,7 @@ function ActionExtension() {
   const [message, setMessage] = useState("");
   const [orderInfo, setOrderInfo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [selectedMandateId, setSelectedMandateId] = useState("");
 
   useEffect(() => {
     async function fetchOrderInfo() {
@@ -50,6 +51,12 @@ function ActionExtension() {
           if (parseFloat(result.order.outstandingAmount) > 0) {
             setAmount(result.order.outstandingAmount);
           }
+          // Select first non-expired card by default
+          const methods = result.order.paymentMethods || [];
+          const validMethod = methods.find((m) => !m.expired);
+          if (validMethod) {
+            setSelectedMandateId(validMethod.id);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch order info:", err);
@@ -64,7 +71,6 @@ function ActionExtension() {
   }, [orderId]);
 
   const handleSubmit = useCallback(async () => {
-    // Prevent double submission
     if (submitting.current) return;
     submitting.current = true;
 
@@ -86,6 +92,13 @@ function ActionExtension() {
       return;
     }
 
+    if (!selectedMandateId) {
+      setStatus("error");
+      setMessage("Please select a payment method.");
+      submitting.current = false;
+      return;
+    }
+
     setStatus("loading");
     setMessage("");
 
@@ -102,6 +115,7 @@ function ActionExtension() {
           orderId,
           amount: parsedAmount.toFixed(2),
           currencyCode: orderInfo?.currencyCode || "GBP",
+          mandateId: selectedMandateId,
           action: "pay",
         }),
       });
@@ -114,7 +128,6 @@ function ActionExtension() {
           result.message ||
             `Payment of ${parsedAmount.toFixed(2)} submitted successfully.`,
         );
-        // Update displayed balance
         if (result.order?.remainingBalance) {
           setOrderInfo((prev) => ({
             ...prev,
@@ -131,14 +144,12 @@ function ActionExtension() {
       setMessage("An unexpected error occurred. Please try again.");
       submitting.current = false;
     }
-  }, [amount, orderId, orderInfo, sessionToken]);
+  }, [amount, orderId, orderInfo, selectedMandateId, sessionToken]);
 
-  // Don't show anything while loading
   if (loading) {
     return null;
   }
 
-  // Don't show if no outstanding balance
   if (orderInfo && parseFloat(orderInfo.outstandingAmount) <= 0) {
     return null;
   }
@@ -159,6 +170,8 @@ function ActionExtension() {
     );
   }
 
+  const paymentMethods = orderInfo?.paymentMethods || [];
+
   return (
     <s-section>
       <s-heading>Pay Invoice</s-heading>
@@ -170,6 +183,35 @@ function ActionExtension() {
         </s-text>
       ) : (
         <s-text>Could not load order details.</s-text>
+      )}
+
+      {paymentMethods.length > 1 && (
+        <s-select
+          label="Payment method"
+          value={selectedMandateId}
+          onChange={(e) => setSelectedMandateId(e.target.value)}
+          disabled={status === "loading"}
+        >
+          {paymentMethods
+            .filter((m) => !m.expired)
+            .map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
+              </option>
+            ))}
+        </s-select>
+      )}
+
+      {paymentMethods.length === 1 && (
+        <s-text>
+          Card: {paymentMethods[0].brand} •••• {paymentMethods[0].lastDigits} ({paymentMethods[0].name})
+        </s-text>
+      )}
+
+      {paymentMethods.length === 0 && (
+        <s-banner status="critical">
+          <s-text>No payment methods found. Please add a card to your account.</s-text>
+        </s-banner>
       )}
 
       <s-text-field
@@ -190,7 +232,7 @@ function ActionExtension() {
         onClick={handleSubmit}
         onPress={handleSubmit}
         loading={status === "loading"}
-        disabled={status === "loading" || !amount}
+        disabled={status === "loading" || !amount || !selectedMandateId}
       >
         Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
       </s-button>
