@@ -228,6 +228,53 @@ mutation {
 
 ---
 
+## Test 3: Multiple Vaulted Cards
+
+**Goal:** Validate that when a CompanyLocation has multiple vaulted cards, we can query them, display them to the user, and let them choose which card to pay with.
+
+### Setup
+- Vaulted two cards on the same CompanyLocation (Lak LLC):
+  - Visa ending in 4242 (lak mok, exp 12/2028)
+  - Mastercard ending in 4444 (Lak Master, exp 12/2029)
+
+### Findings
+
+1. **Multiple cards returned by API** — `paymentCollectionDetails.vaultedPaymentMethods` returns all vaulted cards for the CompanyLocation
+2. **Card details available** — `PaymentMandate.paymentInstrument` (union type `PaymentInstrument`) supports `... on VaultCreditCard` with fields: `brand`, `lastDigits`, `name`, `expiryMonth`, `expiryYear`, `expired`
+3. **Card selector works** — Extension shows a dropdown (`<s-select>` with `<s-option>`) when multiple cards exist. Single card displays inline without a dropdown.
+4. **Selected card is charged correctly** — Tested paying £1 with Mastercard 4444 and £2 with Visa 4242 on Order #1156. Both payments processed successfully against the correct cards.
+5. **No "primary card" concept** — Shopify doesn't designate a default card. The extension defaults to the first non-expired card returned by the API.
+
+### Query for card details
+```graphql
+{
+  order(id: "gid://shopify/Order/XXX") {
+    paymentCollectionDetails {
+      vaultedPaymentMethods {
+        id
+        paymentInstrument {
+          ... on VaultCreditCard {
+            brand
+            lastDigits
+            name
+            expiryMonth
+            expiryYear
+            expired
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### GraphQL type notes
+- `PaymentMandate` has only two fields: `id` and `paymentInstrument`
+- `paymentInstrument` is a union type `PaymentInstrument` with possible types: `VaultCreditCard`, `BankAccount`, `VaultPaypalBillingAgreement`
+- Note: The type is `VaultCreditCard` (not `VaultedCreditCard`)
+
+---
+
 ## Architecture notes for MVP
 
 ### Required scopes
@@ -251,10 +298,17 @@ query {
   }
 }
 
-# Get vaulted payment methods (requires read_payment_mandate)
+# Get vaulted payment methods with card details (requires read_payment_mandate)
 query {
   order(id: $id) {
-    paymentCollectionDetails { vaultedPaymentMethods { id } }
+    paymentCollectionDetails {
+      vaultedPaymentMethods {
+        id
+        paymentInstrument {
+          ... on VaultCreditCard { brand lastDigits name expiryMonth expiryYear expired }
+        }
+      }
+    }
   }
 }
 
