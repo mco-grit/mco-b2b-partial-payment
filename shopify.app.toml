@@ -21,7 +21,7 @@ api_version = "2026-04"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "write_products,read_orders,write_orders,read_payment_mandate,write_payment_mandate"
+scopes = "write_products,read_orders,write_orders,read_payment_mandate,write_payment_mandate,read_customers"
 
 [auth]
 redirect_urls = [ "https://mco-b2b-partial-payment.onrender.com/api/auth" ]
