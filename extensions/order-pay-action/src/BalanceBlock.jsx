@@ -59,9 +59,7 @@ function BalanceBlock() {
       setInfo(data);
       const validMethod = (data.paymentMethods || []).find((m) => !m.expired);
       if (validMethod) setPaymentMethodId(validMethod.id);
-      if (parseFloat(data.totalOutstanding) > 0) {
-        setAmount(data.totalOutstanding);
-      }
+      setAmount(parseFloat(data.totalOutstanding) > 0 ? data.totalOutstanding : "");
     } catch (e) {
       setError("Failed to load balance");
     } finally {
@@ -128,12 +126,16 @@ function BalanceBlock() {
     await fetchInfo();
   }, [fetchInfo]);
 
-  const handleCollapse = useCallback(() => {
+  const handleCollapse = useCallback(async () => {
     setExpanded(false);
     setResults(null);
     setError("");
     attemptRef.current = 1;
-  }, []);
+    // Brief delay to let Shopify finalize order state, then re-fetch
+    setLoading(true);
+    await new Promise((r) => setTimeout(r, 2000));
+    await fetchInfo();
+  }, [fetchInfo]);
 
   if (loading) return null;
 
@@ -289,6 +291,12 @@ function BalanceBlock() {
         {error && (
           <s-banner status="critical">
             <s-text>{error}</s-text>
+          </s-banner>
+        )}
+
+        {submitting && (
+          <s-banner status="warning">
+            <s-text>Payment is being processed. Please do not leave this page.</s-text>
           </s-banner>
         )}
 
