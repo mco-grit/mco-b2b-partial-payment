@@ -158,7 +158,7 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
       companyLocation(id: $id) {
         id
         currency
-        orders(first: 100, query: "financial_status:partially_paid OR financial_status:pending") {
+        orders(first: 100, sortKey: PROCESSED_AT, reverse: false) {
           edges {
             node {
               id
