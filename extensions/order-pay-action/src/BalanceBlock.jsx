@@ -59,7 +59,7 @@ function BalanceBlock() {
       }
       setInfo(data);
       const validMethod = (data.paymentMethods || []).find((m) => !m.expired);
-      if (validMethod) setPaymentMethodId(validMethod.id);
+      if (validMethod) setPaymentMethodId(validMethod.fingerprint || validMethod.id);
       setAmount(parseFloat(data.totalOutstanding) > 0 ? data.totalOutstanding : "");
     } catch (e) {
       setError("Failed to load balance");
@@ -276,7 +276,7 @@ function BalanceBlock() {
             disabled={submitting}
           >
             {validMethods.map((m) => (
-              <s-option key={m.id} value={m.id}>
+              <s-option key={m.fingerprint || m.id} value={m.fingerprint || m.id}>
                 {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
               </s-option>
             ))}

@@ -56,11 +56,25 @@ export async function action({ request }) {
         const batch = allocations.slice(i, i + CONCURRENCY);
         const promises = batch.map((alloc) => {
           const order = info.orders.find((o) => o.id === alloc.orderId);
+          // Resolve the correct mandate ID for this specific order by matching card fingerprint
+          const [brand, lastDigits] = (paymentMethodId || "").split("_");
+          const orderMandate = (order?.vaultedMethods || []).find(
+            (m) => m.brand === brand && m.lastDigits === lastDigits,
+          );
+          if (!orderMandate) {
+            return Promise.resolve({
+              orderId: alloc.orderId,
+              name: order?.name,
+              applied: alloc.applied,
+              status: "failed",
+              error: `No matching payment method found on this order for ${brand} •••• ${lastDigits}`,
+            });
+          }
           return payOneOrder({
             admin,
             orderId: alloc.orderId,
             orderName: order?.name,
-            mandateId: paymentMethodId,
+            mandateId: orderMandate.id,
             amount: alloc.applied,
             currencyCode: info.currencyCode,
             companyLocationId: locationInfo.companyLocationId,
@@ -315,18 +329,21 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
     .map((o) => {
       const outstanding = o.totalOutstandingSet.shopMoney.amount;
       currencyCode = o.totalOutstandingSet.shopMoney.currencyCode || currencyCode;
-      // Aggregate vaulted methods across orders (one card for batch)
-      (o.paymentCollectionDetails?.vaultedPaymentMethods || []).forEach((m) => {
-        if (!aggregatedMethods.has(m.id)) {
-          aggregatedMethods.set(m.id, {
-            id: m.id,
-            brand: m.paymentInstrument?.brand,
-            lastDigits: m.paymentInstrument?.lastDigits,
-            name: m.paymentInstrument?.name,
-            expiryMonth: m.paymentInstrument?.expiryMonth,
-            expiryYear: m.paymentInstrument?.expiryYear,
-            expired: m.paymentInstrument?.expired,
-          });
+      // Collect per-order vaulted methods and aggregate by card fingerprint for the dropdown
+      const orderMethods = (o.paymentCollectionDetails?.vaultedPaymentMethods || []).map((m) => ({
+        id: m.id,
+        brand: m.paymentInstrument?.brand,
+        lastDigits: m.paymentInstrument?.lastDigits,
+        name: m.paymentInstrument?.name,
+        expiryMonth: m.paymentInstrument?.expiryMonth,
+        expiryYear: m.paymentInstrument?.expiryYear,
+        expired: m.paymentInstrument?.expired,
+      }));
+      // Aggregate by card fingerprint (brand+lastDigits) so dropdown shows one entry per physical card
+      orderMethods.forEach((m) => {
+        const fingerprint = `${m.brand}_${m.lastDigits}`;
+        if (!aggregatedMethods.has(fingerprint)) {
+          aggregatedMethods.set(fingerprint, { ...m, fingerprint });
         }
       });
       // Use paymentTerms.paymentSchedules dueAt; fall back to processedAt
@@ -339,6 +356,7 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
         dueAt,
         outstanding,
         overdue,
+        vaultedMethods: orderMethods,
       };
     })
     .sort((a, b) => {
