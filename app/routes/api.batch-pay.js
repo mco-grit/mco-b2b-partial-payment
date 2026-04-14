@@ -93,6 +93,7 @@ export async function action({ request }) {
 
       // Optimistic metafield writeback
       // ARIES will authoritatively set these later, but update now for immediate rep feedback
+      let balanceAfter = null;
       const successTotal = results
         .filter((r) => r.status === "success")
         .reduce((s, r) => s + parseFloat(r.applied), 0);
@@ -150,6 +151,7 @@ export async function action({ request }) {
             { variables: { metafields } },
           );
           console.log("Optimistic metafield update:", { newBalance, newOverdue, newCredit });
+          balanceAfter = { accountBalance: newBalance, overdueBalance: newOverdue, availableCredit: newCredit };
         } catch (metaError) {
           // Don't fail the payment response if metafield update fails
           console.error("Metafield optimistic update failed:", metaError.message);
@@ -161,6 +163,7 @@ export async function action({ request }) {
           requestedAmount: parsedAmount.toFixed(2),
           allocatedAmount: allocatedTotal,
           results,
+          balanceAfter,
         },
         200,
         corsHeaders,
