@@ -39,6 +39,7 @@ function BalanceBlock() {
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState(null);
   const attemptRef = useRef(1);
+  const sessionIdRef = useRef(Math.random().toString(36).slice(2, 10));
 
   const fetchInfo = useCallback(async () => {
     try {
@@ -104,6 +105,7 @@ function BalanceBlock() {
           paymentMethodId,
           amount: parsed.toFixed(2),
           attempt: attemptRef.current,
+          sessionId: sessionIdRef.current,
         }),
       });
       const data = await response.json();
@@ -131,9 +133,10 @@ function BalanceBlock() {
     setResults(null);
     setError("");
     attemptRef.current = 1;
-    // Brief delay to let Shopify finalize order state, then re-fetch
+    sessionIdRef.current = Math.random().toString(36).slice(2, 10);
+    // Shopify needs time to settle order financial state after job completes
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 5000));
     await fetchInfo();
   }, [fetchInfo]);
 
@@ -187,20 +190,45 @@ function BalanceBlock() {
   if (results) {
     const succeeded = results.filter((r) => r.status === "success");
     const failed = results.filter((r) => r.status === "failed");
+    const pending = results.filter((r) => r.status === "pending");
+    const successTotal = succeeded.reduce((s, r) => s + parseFloat(r.applied), 0).toFixed(2);
     return (
       <s-section>
         <s-heading>Payment results</s-heading>
         <s-stack direction="block" gap="base">
-          {succeeded.map((r) => (
-            <s-text key={r.orderId}>
-              ✓ {r.name}: {info.currencyCode} {r.applied} applied
-            </s-text>
-          ))}
-          {failed.map((r) => (
-            <s-text key={r.orderId}>
-              ✗ {r.name}: failed — {r.error || "unknown error"}
-            </s-text>
-          ))}
+          <s-text>
+            {succeeded.length} succeeded ({info.currencyCode} {successTotal})
+            {failed.length > 0 ? `, ${failed.length} failed` : ""}
+            {pending.length > 0 ? `, ${pending.length} pending` : ""}
+          </s-text>
+
+          {failed.length > 0 && (
+            <s-stack direction="block" gap="tight">
+              <s-text>Failed:</s-text>
+              {failed.slice(0, 10).map((r) => (
+                <s-text key={r.orderId}>
+                  ✗ {r.name}: {r.error || "unknown error"}
+                </s-text>
+              ))}
+              {failed.length > 10 && (
+                <s-text>...and {failed.length - 10} more</s-text>
+              )}
+            </s-stack>
+          )}
+
+          {succeeded.length > 0 && succeeded.length <= 10 && (
+            <s-stack direction="block" gap="tight">
+              {succeeded.map((r) => (
+                <s-text key={r.orderId}>
+                  ✓ {r.name}: {info.currencyCode} {r.applied} applied
+                  {r.remainingOutstanding && parseFloat(r.remainingOutstanding) > 0
+                    ? ` — ${info.currencyCode} ${r.remainingOutstanding} remaining`
+                    : " — fully paid"}
+                </s-text>
+              ))}
+            </s-stack>
+          )}
+
           {failed.length > 0 && (
             <s-button onClick={handleRetry} onPress={handleRetry}>
               Retry failed
@@ -225,14 +253,20 @@ function BalanceBlock() {
         <s-text>
           Total outstanding: {info.currencyCode} {info.totalOutstanding} across{" "}
           {info.orders.length} order{info.orders.length === 1 ? "" : "s"}
+          {parseFloat(info.overdueOutstanding) > 0
+            ? ` (${info.currencyCode} ${info.overdueOutstanding} overdue)`
+            : ""}
         </s-text>
 
-        {info.orders.map((o) => (
+        {info.orders.slice(0, 5).map((o) => (
           <s-text key={o.id}>
             {o.name} — {info.currencyCode} {o.outstanding}
             {o.overdue ? " (overdue)" : ""}
           </s-text>
         ))}
+        {info.orders.length > 5 && (
+          <s-text>...and {info.orders.length - 5} more orders</s-text>
+        )}
 
         {validMethods.length > 1 && (
           <s-select
@@ -279,12 +313,15 @@ function BalanceBlock() {
 
         {allocations.length > 0 && (
           <s-stack direction="block" gap="tight">
-            <s-text>Allocation:</s-text>
-            {allocations.map((a) => (
+            <s-text>Allocation ({allocations.length} orders):</s-text>
+            {allocations.slice(0, 5).map((a) => (
               <s-text key={a.orderId}>
                 {info.currencyCode} {a.applied} → {a.name}
               </s-text>
             ))}
+            {allocations.length > 5 && (
+              <s-text>...and {allocations.length - 5} more orders</s-text>
+            )}
           </s-stack>
         )}
 

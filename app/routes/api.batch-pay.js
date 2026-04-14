@@ -35,7 +35,7 @@ export async function action({ request }) {
     }
 
     if (op === "pay") {
-      const { paymentMethodId, amount, attempt } = body;
+      const { paymentMethodId, amount, attempt, sessionId } = body;
 
       if (!paymentMethodId) {
         return jsonResponse({ error: "Missing paymentMethodId" }, 400, corsHeaders);
@@ -50,25 +50,111 @@ export async function action({ request }) {
       const info = await fetchOpenOrdersAndMethods(admin, locationInfo);
       const allocations = allocate(info.orders, parsedAmount);
 
+      const CONCURRENCY = 10;
       const results = [];
-      for (const alloc of allocations) {
-        const order = info.orders.find((o) => o.id === alloc.orderId);
-        const result = await payOneOrder({
-          admin,
-          orderId: alloc.orderId,
-          orderName: order?.name,
-          mandateId: paymentMethodId,
-          amount: alloc.applied,
-          currencyCode: info.currencyCode,
-          companyLocationId: locationInfo.companyLocationId,
-          attempt: attemptNum,
+      for (let i = 0; i < allocations.length; i += CONCURRENCY) {
+        const batch = allocations.slice(i, i + CONCURRENCY);
+        const promises = batch.map((alloc) => {
+          const order = info.orders.find((o) => o.id === alloc.orderId);
+          return payOneOrder({
+            admin,
+            orderId: alloc.orderId,
+            orderName: order?.name,
+            mandateId: paymentMethodId,
+            amount: alloc.applied,
+            currencyCode: info.currencyCode,
+            companyLocationId: locationInfo.companyLocationId,
+            attempt: attemptNum,
+            sessionId: sessionId || "x",
+            outstandingBefore: order?.outstanding,
+          });
         });
-        results.push(result);
+        const settled = await Promise.allSettled(promises);
+        for (let j = 0; j < settled.length; j++) {
+          const s = settled[j];
+          const alloc = batch[j];
+          results.push(
+            s.status === "fulfilled"
+              ? s.value
+              : {
+                  orderId: alloc.orderId,
+                  name: info.orders.find((o) => o.id === alloc.orderId)?.name,
+                  applied: alloc.applied,
+                  status: "failed",
+                  error: s.reason?.message || "Unexpected error",
+                },
+          );
+        }
       }
 
       const allocatedTotal = allocations
         .reduce((s, a) => s + parseFloat(a.applied), 0)
         .toFixed(2);
+
+      // Optimistic metafield writeback
+      // ARIES will authoritatively set these later, but update now for immediate rep feedback
+      const successTotal = results
+        .filter((r) => r.status === "success")
+        .reduce((s, r) => s + parseFloat(r.applied), 0);
+
+      if (successTotal > 0) {
+        try {
+          const customerGid = buyerCustomerId?.toString().startsWith("gid://")
+            ? buyerCustomerId
+            : `gid://shopify/Customer/${buyerCustomerId}`;
+
+          // Read current metafield values
+          const metaResponse = await admin.graphql(
+            `#graphql
+            query GetCustomerBalanceMetafields($id: ID!) {
+              customer(id: $id) {
+                accountBalance: metafield(namespace: "custom", key: "account_balance") { value }
+                overdueBalance: metafield(namespace: "custom", key: "overdue_balance") { value }
+                availableCredit: metafield(namespace: "custom", key: "available_credit") { value }
+                creditLimit: metafield(namespace: "custom", key: "credit_limit") { value }
+              }
+            }`,
+            { variables: { id: customerGid } },
+          );
+          const metaData = await metaResponse.json();
+          const customer = metaData.data?.customer;
+
+          const currentBalance = parseFloat(customer?.accountBalance?.value || "0");
+          const currentOverdue = parseFloat(customer?.overdueBalance?.value || "0");
+          const currentCredit = parseFloat(customer?.availableCredit?.value || "0");
+          const creditLimit = parseFloat(customer?.creditLimit?.value || "0");
+
+          // Optimistic: ARIES will authoritatively correct these within minutes.
+          // overdue formula works because allocation is oldest-due-first (overdue orders paid before non-overdue).
+          // Race condition possible if two reps pay simultaneously — ARIES resolves.
+          const newBalance = Math.max(0, currentBalance - successTotal).toFixed(2);
+          const newOverdue = Math.max(0, currentOverdue - successTotal).toFixed(2);
+          const newCredit = creditLimit > 0
+            ? Math.min(creditLimit, currentCredit + successTotal).toFixed(2)
+            : (currentCredit + successTotal).toFixed(2);
+
+          const metafields = [
+            { ownerId: customerGid, namespace: "custom", key: "account_balance", type: "number_decimal", value: newBalance },
+            { ownerId: customerGid, namespace: "custom", key: "overdue_balance", type: "number_decimal", value: newOverdue },
+            { ownerId: customerGid, namespace: "custom", key: "available_credit", type: "number_decimal", value: newCredit },
+          ];
+
+          await admin.graphql(
+            `#graphql
+            mutation SetBalanceMetafields($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                metafields { id }
+                userErrors { field message }
+              }
+            }`,
+            { variables: { metafields } },
+          );
+          console.log("Optimistic metafield update:", { newBalance, newOverdue, newCredit });
+        } catch (metaError) {
+          // Don't fail the payment response if metafield update fails
+          console.error("Metafield optimistic update failed:", metaError.message);
+        }
+      }
 
       return jsonResponse(
         {
@@ -151,57 +237,77 @@ async function resolveCompanyLocation(admin, customerId) {
 }
 
 async function fetchOpenOrdersAndMethods(admin, locationInfo) {
-  // Fetch open orders for the company location
-  const response = await admin.graphql(
-    `#graphql
-    query GetCompanyLocationOpenOrders($id: ID!) {
-      companyLocation(id: $id) {
-        id
-        currency
-        orders(first: 100, sortKey: PROCESSED_AT, reverse: false) {
-          edges {
-            node {
-              id
-              name
-              processedAt
-              displayFinancialStatus
-              totalOutstandingSet { shopMoney { amount currencyCode } }
-              paymentCollectionDetails {
-                vaultedPaymentMethods {
-                  id
-                  paymentInstrument {
-                    ... on VaultCreditCard {
-                      brand lastDigits name expiryMonth expiryYear expired
+  // Paginate through all orders for the company location
+  let allNodes = [];
+  let hasNextPage = true;
+  let cursor = null;
+
+  while (hasNextPage) {
+    const response = await admin.graphql(
+      `#graphql
+      query GetCompanyLocationOpenOrders($id: ID!, $cursor: String) {
+        companyLocation(id: $id) {
+          id
+          currency
+          orders(first: 250, after: $cursor, sortKey: PROCESSED_AT, reverse: false) {
+            edges {
+              node {
+                id
+                name
+                processedAt
+                displayFinancialStatus
+                totalOutstandingSet { shopMoney { amount currencyCode } }
+                paymentTerms {
+                  paymentSchedules(first: 1) {
+                    nodes { dueAt }
+                  }
+                }
+                paymentCollectionDetails {
+                  vaultedPaymentMethods {
+                    id
+                    paymentInstrument {
+                      ... on VaultCreditCard {
+                        brand lastDigits name expiryMonth expiryYear expired
+                      }
                     }
                   }
                 }
               }
+              cursor
             }
+            pageInfo { hasNextPage }
           }
         }
-      }
-    }`,
-    { variables: { id: locationInfo.companyLocationId } },
-  );
-  const data = await response.json();
-  const loc = data.data?.companyLocation;
-  if (!loc) {
-    return {
-      companyLocationId: locationInfo.companyLocationId,
-      currencyCode: locationInfo.currency,
-      totalOutstanding: "0.00",
-      overdueOutstanding: "0.00",
-      orders: [],
-      paymentMethods: [],
-    };
+      }`,
+      { variables: { id: locationInfo.companyLocationId, cursor } },
+    );
+    const data = await response.json();
+    const loc = data.data?.companyLocation;
+    if (!loc) {
+      return {
+        companyLocationId: locationInfo.companyLocationId,
+        currencyCode: locationInfo.currency,
+        totalOutstanding: "0.00",
+        overdueOutstanding: "0.00",
+        orders: [],
+        paymentMethods: [],
+      };
+    }
+    const edges = loc.orders?.edges || [];
+    allNodes.push(...edges.map((e) => e.node));
+    hasNextPage = loc.orders?.pageInfo?.hasNextPage || false;
+    if (edges.length > 0) {
+      cursor = edges[edges.length - 1].cursor;
+    } else {
+      hasNextPage = false;
+    }
   }
 
   const now = new Date();
   let currencyCode = locationInfo.currency;
   let aggregatedMethods = new Map();
 
-  const rawOrders = (loc.orders?.edges || [])
-    .map((e) => e.node)
+  const rawOrders = allNodes
     .filter((o) => parseFloat(o.totalOutstandingSet?.shopMoney?.amount || "0") > 0)
     .map((o) => {
       const outstanding = o.totalOutstandingSet.shopMoney.amount;
@@ -220,8 +326,9 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
           });
         }
       });
-      // paymentTerms.nextDueAt isn't a real field — placeholder; fall back to processedAt
-      const dueAt = o.processedAt;
+      // Use paymentTerms.paymentSchedules dueAt; fall back to processedAt
+      const scheduleDueAt = o.paymentTerms?.paymentSchedules?.nodes?.[0]?.dueAt;
+      const dueAt = scheduleDueAt || o.processedAt;
       const overdue = dueAt ? new Date(dueAt) < now : false;
       return {
         id: o.id,
@@ -284,9 +391,10 @@ async function payOneOrder({
   currencyCode,
   companyLocationId,
   attempt,
+  sessionId,
+  outstandingBefore,
 }) {
-  // Idempotency key — must be <=32 chars. Hash the parts.
-  const idempotencyKey = makeIdempotencyKey(companyLocationId, orderId, attempt);
+  const idempotencyKey = makeIdempotencyKey(orderId, attempt, sessionId);
 
   const callMutation = async () => {
     const response = await admin.graphql(
@@ -359,11 +467,40 @@ async function payOneOrder({
         jobId: job.id,
       };
     }
+
+    // Verify: re-query order outstanding to confirm payment actually applied
+    const verifyResponse = await admin.graphql(
+      `#graphql
+      query VerifyPayment($orderId: ID!) {
+        order(id: $orderId) {
+          totalOutstandingSet { shopMoney { amount } }
+        }
+      }`,
+      { variables: { orderId } },
+    );
+    const verifyData = await verifyResponse.json();
+    const remainingOutstanding = verifyData.data?.order?.totalOutstandingSet?.shopMoney?.amount || "0";
+    const before = parseFloat(outstandingBefore || "0");
+    const after = parseFloat(remainingOutstanding);
+
+    // If outstanding didn't decrease, the payment silently failed
+    if (before > 0 && after >= before) {
+      return {
+        orderId,
+        name: orderName,
+        applied: amount,
+        status: "failed",
+        remainingOutstanding,
+        error: "Payment was processed but balance did not decrease. The selected card may have been declined.",
+      };
+    }
+
     return {
       orderId,
       name: orderName,
       applied: amount,
       status: "success",
+      remainingOutstanding,
     };
   } catch (e) {
     return {
@@ -376,12 +513,12 @@ async function payOneOrder({
   }
 }
 
-function makeIdempotencyKey(companyLocationId, orderId, attempt) {
-  // Extract numeric ids and combine. Cap at 32 chars.
-  const locNum = (companyLocationId.match(/\d+$/) || ["0"])[0];
+function makeIdempotencyKey(orderId, attempt, sessionId) {
+  // Deterministic within a session+attempt: same click = same key = Shopify dedupes (double-click safe).
+  // New session (re-open widget) = new sessionId = new key = fresh attempt (avoids stale cache).
   const ordNum = (orderId.match(/\d+$/) || ["0"])[0];
-  const raw = `b${locNum}o${ordNum}a${attempt}`;
-  return raw.length > 32 ? raw.slice(0, 32) : raw;
+  const raw = `${ordNum}_${attempt}_${sessionId}`;
+  return raw.slice(0, 32);
 }
 
 async function pollJob(admin, jobId, maxAttempts = 10, delayMs = 2000) {
