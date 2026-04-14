@@ -17,9 +17,10 @@ export async function action({ request }) {
     // Validate customer session token
     const auth = await authenticate.public.customerAccount(request);
 
-    // Get shop domain from session token
+    // Get shop domain and customer ID from session token
     const dest = auth.sessionToken.dest;
     const shopDomain = dest.includes("://") ? new URL(dest).hostname : dest;
+    const buyerCustomerId = auth.sessionToken.sub;
 
     // Get Admin API client using the app's offline access token (stored in PostgreSQL)
     const { admin } = await unauthenticated.admin(shopDomain);
@@ -261,6 +262,61 @@ export async function action({ request }) {
 
       const updatedOrderData = await updatedOrderResponse.json();
       const updatedOrder = updatedOrderData.data?.order;
+
+      // Optimistic metafield writeback — ARIES will authoritatively correct later
+      try {
+        const customerGid = buyerCustomerId?.toString().startsWith("gid://")
+          ? buyerCustomerId
+          : `gid://shopify/Customer/${buyerCustomerId}`;
+
+        const metaResponse = await admin.graphql(
+          `#graphql
+          query GetCustomerBalanceMetafields($id: ID!) {
+            customer(id: $id) {
+              accountBalance: metafield(namespace: "custom", key: "account_balance") { value }
+              overdueBalance: metafield(namespace: "custom", key: "overdue_balance") { value }
+              availableCredit: metafield(namespace: "custom", key: "available_credit") { value }
+              creditLimit: metafield(namespace: "custom", key: "credit_limit") { value }
+            }
+          }`,
+          { variables: { id: customerGid } },
+        );
+        const metaData = await metaResponse.json();
+        const customer = metaData.data?.customer;
+
+        const currentBalance = parseFloat(customer?.accountBalance?.value || "0");
+        const currentOverdue = parseFloat(customer?.overdueBalance?.value || "0");
+        const currentCredit = parseFloat(customer?.availableCredit?.value || "0");
+        const creditLimit = parseFloat(customer?.creditLimit?.value || "0");
+
+        const newBalance = Math.max(0, currentBalance - parsedAmount).toFixed(2);
+        const newOverdue = Math.max(0, currentOverdue - parsedAmount).toFixed(2);
+        const newCredit = creditLimit > 0
+          ? Math.min(creditLimit, currentCredit + parsedAmount).toFixed(2)
+          : (currentCredit + parsedAmount).toFixed(2);
+
+        await admin.graphql(
+          `#graphql
+          mutation SetBalanceMetafields($metafields: [MetafieldsSetInput!]!) {
+            metafieldsSet(metafields: $metafields) {
+              metafields { id }
+              userErrors { field message }
+            }
+          }`,
+          {
+            variables: {
+              metafields: [
+                { ownerId: customerGid, namespace: "custom", key: "account_balance", type: "number_decimal", value: newBalance },
+                { ownerId: customerGid, namespace: "custom", key: "overdue_balance", type: "number_decimal", value: newOverdue },
+                { ownerId: customerGid, namespace: "custom", key: "available_credit", type: "number_decimal", value: newCredit },
+              ],
+            },
+          },
+        );
+        console.log("Single-order optimistic metafield update:", { newBalance, newOverdue, newCredit });
+      } catch (metaError) {
+        console.error("Metafield optimistic update failed:", metaError.message);
+      }
 
       return jsonResponse({
         success: true,
