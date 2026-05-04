@@ -27,6 +27,7 @@ function ActionExtension() {
   const [orderInfo, setOrderInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedMandateId, setSelectedMandateId] = useState("");
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     async function fetchOrderInfo() {
@@ -166,6 +167,19 @@ function ActionExtension() {
             {orderInfo.outstandingAmount}
           </s-text>
         )}
+      </s-section>
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <s-section>
+        <s-button
+          variant="primary"
+          onClick={() => setExpanded(true)}
+        >
+          Partial Pay
+        </s-button>
       </s-section>
     );
   }
