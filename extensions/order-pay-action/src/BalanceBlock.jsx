@@ -72,6 +72,20 @@ function BalanceBlock() {
     fetchInfo();
   }, [fetchInfo]);
 
+  useEffect(() => {
+    if (loading || !info || parseFloat(info.totalOutstanding) <= 0) return;
+    try {
+      const search =
+        shopify?.navigation?.currentEntry?.url
+          ? new URL(shopify.navigation.currentEntry.url).search
+          : window.location.search;
+      const params = new URLSearchParams(search);
+      if (params.get("openPay") === "1") setExpanded(true);
+    } catch (e) {
+      // ignore — auto-expand is best-effort
+    }
+  }, [loading, info]);
+
   const allocations = useMemo(() => {
     if (!info || !amount) return [];
     const parsed = parseFloat(amount);
