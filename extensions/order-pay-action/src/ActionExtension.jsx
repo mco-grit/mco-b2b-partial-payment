@@ -28,6 +28,7 @@ function ActionExtension() {
   const [loading, setLoading] = useState(true);
   const [selectedMandateId, setSelectedMandateId] = useState("");
   const [expanded, setExpanded] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     async function fetchOrderInfo() {
@@ -171,15 +172,24 @@ function ActionExtension() {
     );
   }
 
+  if (dismissed) {
+    return null;
+  }
+
   if (!expanded) {
     return (
       <s-section>
-        <s-button
-          variant="primary"
-          onClick={() => setExpanded(true)}
-        >
-          Partial Pay
-        </s-button>
+        <s-stack direction="inline" gap="base" justify-content="end">
+          <s-button onClick={() => setDismissed(true)}>
+            {shopify.i18n.translate("notNow")}
+          </s-button>
+          <s-button
+            variant="primary"
+            onClick={() => setExpanded(true)}
+          >
+            {shopify.i18n.translate("makeAPayment")}
+          </s-button>
+        </s-stack>
       </s-section>
     );
   }
