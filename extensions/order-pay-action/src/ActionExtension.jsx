@@ -178,7 +178,7 @@ function ActionExtension() {
           variant="primary"
           onClick={() => setExpanded(true)}
         >
-          Partial Pay
+          {shopify.i18n.translate("makeAPayment")}
         </s-button>
       </s-section>
     );
