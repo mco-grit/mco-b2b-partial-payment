@@ -248,16 +248,21 @@ function BalanceBlock() {
             </s-stack>
           )}
 
-          <s-stack direction="inline" gap="base" justify-content="end">
+          <s-grid gridTemplateColumns={failed.length > 0 ? "1fr auto auto" : "1fr auto"} gap="base">
+            <s-grid-item />
             {failed.length > 0 && (
-              <s-button onClick={handleRetry}>
-                Retry failed
-              </s-button>
+              <s-grid-item>
+                <s-button onClick={handleRetry}>
+                  Retry failed
+                </s-button>
+              </s-grid-item>
             )}
-            <s-button variant="primary" onClick={handleCollapse}>
-              Done
-            </s-button>
-          </s-stack>
+            <s-grid-item>
+              <s-button variant="primary" onClick={handleCollapse}>
+                Done
+              </s-button>
+            </s-grid-item>
+          </s-grid>
         </s-stack>
       </s-section>
     );
@@ -348,7 +353,7 @@ function BalanceBlock() {
           </s-banner>
         )}
 
-        <s-stack direction="inline" gap="base" justify-content="end">
+        <s-stack direction="inline" gap="base">
           <s-button onClick={handleCancel} disabled={submitting}>
             Not now
           </s-button>

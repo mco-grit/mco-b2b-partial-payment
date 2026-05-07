@@ -174,14 +174,16 @@ function ActionExtension() {
   if (!expanded) {
     return (
       <s-section>
-        <s-grid grid-template-columns="1fr auto">
-          <s-box />
-          <s-button
-            variant="primary"
-            onClick={() => setExpanded(true)}
-          >
-            {shopify.i18n.translate("makeAPayment")}
-          </s-button>
+        <s-grid gridTemplateColumns="1fr auto">
+          <s-grid-item />
+          <s-grid-item>
+            <s-button
+              variant="primary"
+              onClick={() => setExpanded(true)}
+            >
+              {shopify.i18n.translate("makeAPayment")}
+            </s-button>
+          </s-grid-item>
         </s-grid>
       </s-section>
     );
@@ -245,22 +247,26 @@ function ActionExtension() {
           </s-banner>
         )}
 
-        <s-grid grid-template-columns="1fr auto auto" gap="base">
-          <s-box />
-          <s-button
-            onClick={() => setExpanded(false)}
-            disabled={status === "loading"}
-          >
-            {shopify.i18n.translate("notNow")}
-          </s-button>
-          <s-button
-            variant="primary"
-            onClick={handleSubmit}
-            loading={status === "loading"}
-            disabled={status === "loading" || !amount || !selectedMandateId}
-          >
-            Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
-          </s-button>
+        <s-grid gridTemplateColumns="1fr auto auto" gap="base">
+          <s-grid-item />
+          <s-grid-item>
+            <s-button
+              onClick={() => setExpanded(false)}
+              disabled={status === "loading"}
+            >
+              {shopify.i18n.translate("notNow")}
+            </s-button>
+          </s-grid-item>
+          <s-grid-item>
+            <s-button
+              variant="primary"
+              onClick={handleSubmit}
+              loading={status === "loading"}
+              disabled={status === "loading" || !amount || !selectedMandateId}
+            >
+              Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
+            </s-button>
+          </s-grid-item>
         </s-grid>
       </s-stack>
     </s-section>
