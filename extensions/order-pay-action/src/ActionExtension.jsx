@@ -28,7 +28,6 @@ function ActionExtension() {
   const [loading, setLoading] = useState(true);
   const [selectedMandateId, setSelectedMandateId] = useState("");
   const [expanded, setExpanded] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     async function fetchOrderInfo() {
@@ -172,21 +171,18 @@ function ActionExtension() {
     );
   }
 
-  if (dismissed) {
-    return null;
-  }
-
   if (!expanded) {
     return (
       <s-section>
-        <s-stack direction="inline" justify-content="end">
+        <s-grid grid-template-columns="1fr auto">
+          <s-box />
           <s-button
             variant="primary"
             onClick={() => setExpanded(true)}
           >
             {shopify.i18n.translate("makeAPayment")}
           </s-button>
-        </s-stack>
+        </s-grid>
       </s-section>
     );
   }
@@ -195,74 +191,77 @@ function ActionExtension() {
 
   return (
     <s-section>
-      <s-heading>Pay Invoice</s-heading>
+      <s-stack direction="block" gap="base">
+        <s-heading>Pay Invoice</s-heading>
 
-      {orderInfo ? (
-        <s-text>
-          Outstanding balance: {orderInfo.currencyCode}{" "}
-          {orderInfo.outstandingAmount}
-        </s-text>
-      ) : (
-        <s-text>Could not load order details.</s-text>
-      )}
+        {orderInfo ? (
+          <s-text>
+            Outstanding balance: {orderInfo.currencyCode}{" "}
+            {orderInfo.outstandingAmount}
+          </s-text>
+        ) : (
+          <s-text>Could not load order details.</s-text>
+        )}
 
-      {paymentMethods.length > 1 && (
-        <s-select
-          label="Payment method"
-          value={selectedMandateId}
-          onChange={(e) => setSelectedMandateId(e.target.value)}
+        {paymentMethods.length > 1 && (
+          <s-select
+            label="Payment method"
+            value={selectedMandateId}
+            onChange={(e) => setSelectedMandateId(e.target.value)}
+            disabled={status === "loading"}
+          >
+            {paymentMethods
+              .filter((m) => !m.expired)
+              .map((m) => (
+                <s-option key={m.id} value={m.id}>
+                  {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
+                </s-option>
+              ))}
+          </s-select>
+        )}
+
+        {paymentMethods.length === 1 && (
+          <s-text>
+            Card: {paymentMethods[0].brand} •••• {paymentMethods[0].lastDigits} ({paymentMethods[0].name})
+          </s-text>
+        )}
+
+        {paymentMethods.length === 0 && (
+          <s-banner status="critical">
+            <s-text>No payment methods found. Please add a card to your account.</s-text>
+          </s-banner>
+        )}
+
+        <s-text-field
+          label="Payment amount"
+          value={amount}
+          onInput={(e) => setAmount(e.target.value)}
           disabled={status === "loading"}
-        >
-          {paymentMethods
-            .filter((m) => !m.expired)
-            .map((m) => (
-              <s-option key={m.id} value={m.id}>
-                {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
-              </s-option>
-            ))}
-        </s-select>
-      )}
+        />
 
-      {paymentMethods.length === 1 && (
-        <s-text>
-          Card: {paymentMethods[0].brand} •••• {paymentMethods[0].lastDigits} ({paymentMethods[0].name})
-        </s-text>
-      )}
+        {status === "error" && (
+          <s-banner status="critical">
+            <s-text>{message}</s-text>
+          </s-banner>
+        )}
 
-      {paymentMethods.length === 0 && (
-        <s-banner status="critical">
-          <s-text>No payment methods found. Please add a card to your account.</s-text>
-        </s-banner>
-      )}
-
-      <s-text-field
-        label="Payment amount"
-        value={amount}
-        onInput={(e) => setAmount(e.target.value)}
-        disabled={status === "loading"}
-      />
-
-      {status === "error" && (
-        <s-banner status="critical">
-          <s-text>{message}</s-text>
-        </s-banner>
-      )}
-
-      <s-stack direction="inline" gap="base" justify-content="end">
-        <s-button
-          onClick={() => setDismissed(true)}
-          disabled={status === "loading"}
-        >
-          {shopify.i18n.translate("notNow")}
-        </s-button>
-        <s-button
-          variant="primary"
-          onClick={handleSubmit}
-          loading={status === "loading"}
-          disabled={status === "loading" || !amount || !selectedMandateId}
-        >
-          Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
-        </s-button>
+        <s-grid grid-template-columns="1fr auto auto" gap="base">
+          <s-box />
+          <s-button
+            onClick={() => setExpanded(false)}
+            disabled={status === "loading"}
+          >
+            {shopify.i18n.translate("notNow")}
+          </s-button>
+          <s-button
+            variant="primary"
+            onClick={handleSubmit}
+            loading={status === "loading"}
+            disabled={status === "loading" || !amount || !selectedMandateId}
+          >
+            Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
+          </s-button>
+        </s-grid>
       </s-stack>
     </s-section>
   );

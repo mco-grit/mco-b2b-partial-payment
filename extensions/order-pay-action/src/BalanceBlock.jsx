@@ -154,6 +154,11 @@ function BalanceBlock() {
     await fetchInfo();
   }, [fetchInfo]);
 
+  const handleCancel = useCallback(() => {
+    setExpanded(false);
+    setError("");
+  }, []);
+
   if (loading) return null;
 
   if (error && !info) {
@@ -344,7 +349,7 @@ function BalanceBlock() {
         )}
 
         <s-stack direction="inline" gap="base" justify-content="end">
-          <s-button onClick={handleCollapse} disabled={submitting}>
+          <s-button onClick={handleCancel} disabled={submitting}>
             Not now
           </s-button>
           <s-button
