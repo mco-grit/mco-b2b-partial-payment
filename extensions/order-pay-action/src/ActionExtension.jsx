@@ -179,10 +179,7 @@ function ActionExtension() {
   if (!expanded) {
     return (
       <s-section>
-        <s-stack direction="inline" gap="base" justify-content="end">
-          <s-button onClick={() => setDismissed(true)}>
-            {shopify.i18n.translate("notNow")}
-          </s-button>
+        <s-stack direction="inline" justify-content="end">
           <s-button
             variant="primary"
             onClick={() => setExpanded(true)}
@@ -251,15 +248,22 @@ function ActionExtension() {
         </s-banner>
       )}
 
-      <s-button
-        kind="primary"
-        onClick={handleSubmit}
-        onPress={handleSubmit}
-        loading={status === "loading"}
-        disabled={status === "loading" || !amount || !selectedMandateId}
-      >
-        Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
-      </s-button>
+      <s-stack direction="inline" gap="base" justify-content="end">
+        <s-button
+          onClick={() => setDismissed(true)}
+          disabled={status === "loading"}
+        >
+          {shopify.i18n.translate("notNow")}
+        </s-button>
+        <s-button
+          variant="primary"
+          onClick={handleSubmit}
+          loading={status === "loading"}
+          disabled={status === "loading" || !amount || !selectedMandateId}
+        >
+          Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
+        </s-button>
+      </s-stack>
     </s-section>
   );
 }
