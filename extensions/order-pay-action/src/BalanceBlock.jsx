@@ -192,7 +192,7 @@ function BalanceBlock() {
           <s-text>
             {info.orders.length} open order{info.orders.length === 1 ? "" : "s"}
           </s-text>
-          <s-button kind="primary" onClick={() => setExpanded(true)} onPress={() => setExpanded(true)}>
+          <s-button variant="primary" onClick={() => setExpanded(true)}>
             Pay outstanding balance
           </s-button>
         </s-stack>
@@ -243,14 +243,16 @@ function BalanceBlock() {
             </s-stack>
           )}
 
-          {failed.length > 0 && (
-            <s-button onClick={handleRetry} onPress={handleRetry}>
-              Retry failed
+          <s-stack direction="inline" gap="base" justify-content="end">
+            {failed.length > 0 && (
+              <s-button onClick={handleRetry}>
+                Retry failed
+              </s-button>
+            )}
+            <s-button variant="primary" onClick={handleCollapse}>
+              Done
             </s-button>
-          )}
-          <s-button onClick={handleCollapse} onPress={handleCollapse}>
-            Done
-          </s-button>
+          </s-stack>
         </s-stack>
       </s-section>
     );
@@ -271,16 +273,6 @@ function BalanceBlock() {
             ? ` (${info.currencyCode} ${info.overdueOutstanding} overdue)`
             : ""}
         </s-text>
-
-        {info.orders.slice(0, 5).map((o) => (
-          <s-text key={o.id}>
-            {o.name} — {info.currencyCode} {o.outstanding}
-            {o.overdue ? " (overdue)" : ""}
-          </s-text>
-        ))}
-        {info.orders.length > 5 && (
-          <s-text>...and {info.orders.length - 5} more orders</s-text>
-        )}
 
         {validMethods.length > 1 && (
           <s-select
@@ -351,18 +343,17 @@ function BalanceBlock() {
           </s-banner>
         )}
 
-        <s-stack direction="inline" gap="base">
+        <s-stack direction="inline" gap="base" justify-content="end">
+          <s-button onClick={handleCollapse} disabled={submitting}>
+            Not now
+          </s-button>
           <s-button
-            kind="primary"
+            variant="primary"
             onClick={handleSubmit}
-            onPress={handleSubmit}
             loading={submitting}
             disabled={submitting || !amount || !paymentMethodId}
           >
             Pay {info.currencyCode} {amount || "0.00"}
-          </s-button>
-          <s-button onClick={handleCollapse} onPress={handleCollapse} disabled={submitting}>
-            Cancel
           </s-button>
         </s-stack>
       </s-stack>
