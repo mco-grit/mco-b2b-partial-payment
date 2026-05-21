@@ -93,6 +93,19 @@ function BalanceBlock() {
     return allocate(info.orders, parsed);
   }, [info, amount]);
 
+  const formatMoney = useMemo(() => {
+    const currency = info?.currencyCode;
+    if (!currency) return (v) => String(v);
+    const formatter = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    });
+    return (v) => {
+      const n = parseFloat(v);
+      return isNaN(n) ? String(v) : formatter.format(n);
+    };
+  }, [info?.currencyCode]);
+
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
     const parsed = parseFloat(amount);
@@ -187,11 +200,11 @@ function BalanceBlock() {
         <s-heading>Outstanding balance</s-heading>
         <s-stack direction="block" gap="base">
           <s-text>
-            Balance: {info.currencyCode} {info.totalOutstanding}
+            Balance: {formatMoney(info.totalOutstanding)}
           </s-text>
           {parseFloat(info.overdueOutstanding) > 0 && (
             <s-text>
-              Overdue: {info.currencyCode} {info.overdueOutstanding}
+              Overdue: {formatMoney(info.overdueOutstanding)}
             </s-text>
           )}
           <s-text>
@@ -216,7 +229,7 @@ function BalanceBlock() {
         <s-heading>Payment results</s-heading>
         <s-stack direction="block" gap="base">
           <s-text>
-            {succeeded.length} succeeded ({info.currencyCode} {successTotal})
+            {succeeded.length} succeeded ({formatMoney(successTotal)})
             {failed.length > 0 ? `, ${failed.length} failed` : ""}
             {pending.length > 0 ? `, ${pending.length} pending` : ""}
           </s-text>
@@ -239,9 +252,9 @@ function BalanceBlock() {
             <s-stack direction="block" gap="tight">
               {succeeded.map((r) => (
                 <s-text key={r.orderId}>
-                  ✓ {r.name}: {info.currencyCode} {r.applied} applied
+                  ✓ {r.name}: {formatMoney(r.applied)} applied
                   {r.remainingOutstanding && parseFloat(r.remainingOutstanding) > 0
-                    ? ` — ${info.currencyCode} ${r.remainingOutstanding} remaining`
+                    ? ` — ${formatMoney(r.remainingOutstanding)} remaining`
                     : " — fully paid"}
                 </s-text>
               ))}
@@ -277,10 +290,10 @@ function BalanceBlock() {
 
       <s-stack direction="block" gap="base">
         <s-text>
-          Total outstanding: {info.currencyCode} {info.totalOutstanding} across{" "}
+          Total outstanding: {formatMoney(info.totalOutstanding)} across{" "}
           {info.orders.length} order{info.orders.length === 1 ? "" : "s"}
           {parseFloat(info.overdueOutstanding) > 0
-            ? ` (${info.currencyCode} ${info.overdueOutstanding} overdue)`
+            ? ` (${formatMoney(info.overdueOutstanding)} overdue)`
             : ""}
         </s-text>
 
@@ -332,7 +345,7 @@ function BalanceBlock() {
             <s-text>Allocation ({allocations.length} orders):</s-text>
             {allocations.slice(0, 5).map((a) => (
               <s-text key={a.orderId}>
-                {info.currencyCode} {a.applied} → {a.name}
+                {formatMoney(a.applied)} → {a.name}
               </s-text>
             ))}
             {allocations.length > 5 && (
@@ -363,7 +376,7 @@ function BalanceBlock() {
             loading={submitting}
             disabled={submitting || !amount || !paymentMethodId}
           >
-            Pay {info.currencyCode} {amount || "0.00"}
+            Pay {formatMoney(amount || "0.00")}
           </s-button>
         </s-stack>
       </s-stack>
