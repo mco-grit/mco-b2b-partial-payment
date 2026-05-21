@@ -320,7 +320,6 @@ export async function action({ request }) {
 
       return jsonResponse({
         success: true,
-        message: `Payment of ${currencyCode} ${parsedAmount.toFixed(2)} applied to order ${updatedOrder?.name || orderId}.`,
         order: {
           id: updatedOrder?.id,
           name: updatedOrder?.name,

@@ -1,6 +1,6 @@
 import "@shopify/ui-extensions/preact";
 import { render } from "preact";
-import { useState, useCallback, useEffect, useRef } from "preact/hooks";
+import { useState, useCallback, useEffect, useRef, useMemo } from "preact/hooks";
 import {
   useOrder,
   useSessionToken,
@@ -28,6 +28,19 @@ function ActionExtension() {
   const [loading, setLoading] = useState(true);
   const [selectedMandateId, setSelectedMandateId] = useState("");
   const [expanded, setExpanded] = useState(false);
+
+  const formatMoney = useMemo(() => {
+    const currency = orderInfo?.currencyCode;
+    if (!currency) return (v) => String(v);
+    const formatter = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+    });
+    return (v) => {
+      const n = parseFloat(v);
+      return isNaN(n) ? String(v) : formatter.format(n);
+    };
+  }, [orderInfo?.currencyCode]);
 
   useEffect(() => {
     async function fetchOrderInfo() {
@@ -87,7 +100,7 @@ function ActionExtension() {
     if (parsedAmount > outstanding) {
       setStatus("error");
       setMessage(
-        `Amount cannot exceed outstanding balance of ${orderInfo?.currencyCode} ${outstanding.toFixed(2)}.`,
+        `Amount cannot exceed outstanding balance of ${formatMoney(outstanding.toFixed(2))}.`,
       );
       submitting.current = false;
       return;
@@ -125,9 +138,11 @@ function ActionExtension() {
 
       if (response.ok && result.success) {
         setStatus("success");
+        const orderName = result.order?.name || orderId;
         setMessage(
-          result.message ||
-            `Payment of ${parsedAmount.toFixed(2)} submitted successfully.`,
+          result.pending
+            ? result.message || "Payment submitted and is still processing."
+            : `Payment of ${formatMoney(parsedAmount)} applied to order ${orderName}.`,
         );
         if (result.order?.remainingBalance) {
           setOrderInfo((prev) => ({
@@ -157,118 +172,112 @@ function ActionExtension() {
 
   if (status === "success") {
     return (
-      <s-section>
+      <s-stack direction="block" gap="base">
         <s-banner status="success">
           <s-text>{message}</s-text>
         </s-banner>
         {orderInfo && parseFloat(orderInfo.outstandingAmount) > 0 && (
           <s-text>
-            Remaining balance: {orderInfo.currencyCode}{" "}
-            {orderInfo.outstandingAmount}
+            Remaining balance: {formatMoney(orderInfo.outstandingAmount)}
           </s-text>
         )}
-      </s-section>
+      </s-stack>
     );
   }
 
   if (!expanded) {
     return (
-      <s-section>
-        <s-grid gridTemplateColumns="1fr auto">
-          <s-grid-item />
-          <s-grid-item>
-            <s-button
-              variant="primary"
-              onClick={() => setExpanded(true)}
-            >
-              {shopify.i18n.translate("makeAPayment")}
-            </s-button>
-          </s-grid-item>
-        </s-grid>
-      </s-section>
+      <s-grid gridTemplateColumns="1fr auto">
+        <s-grid-item />
+        <s-grid-item>
+          <s-button
+            variant="primary"
+            onClick={() => setExpanded(true)}
+          >
+            {shopify.i18n.translate("makeAPayment")}
+          </s-button>
+        </s-grid-item>
+      </s-grid>
     );
   }
 
   const paymentMethods = orderInfo?.paymentMethods || [];
 
   return (
-    <s-section>
-      <s-stack direction="block" gap="base">
-        <s-heading>Pay Invoice</s-heading>
+    <s-stack direction="block" gap="base">
+      <s-heading>Pay Invoice</s-heading>
 
-        {orderInfo ? (
-          <s-text>
-            Outstanding balance: {orderInfo.currencyCode}{" "}
-            {orderInfo.outstandingAmount}
-          </s-text>
-        ) : (
-          <s-text>Could not load order details.</s-text>
-        )}
+      {orderInfo ? (
+        <s-text>
+          Outstanding balance: {formatMoney(orderInfo.outstandingAmount)}
+        </s-text>
+      ) : (
+        <s-text>Could not load order details.</s-text>
+      )}
 
-        {paymentMethods.length > 1 && (
-          <s-select
-            label="Payment method"
-            value={selectedMandateId}
-            onChange={(e) => setSelectedMandateId(e.target.value)}
+      {paymentMethods.length > 1 && (
+        <s-select
+          label="Payment method"
+          value={selectedMandateId}
+          onChange={(e) => setSelectedMandateId(e.target.value)}
+          disabled={status === "loading"}
+        >
+          {paymentMethods
+            .filter((m) => !m.expired)
+            .map((m) => (
+              <s-option key={m.id} value={m.id}>
+                {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
+              </s-option>
+            ))}
+        </s-select>
+      )}
+
+      {paymentMethods.length === 1 && (
+        <s-text>
+          Card: {paymentMethods[0].brand} •••• {paymentMethods[0].lastDigits} ({paymentMethods[0].name})
+        </s-text>
+      )}
+
+      {paymentMethods.length === 0 && (
+        <s-banner status="critical">
+          <s-text>No payment methods found. Please add a card to your account.</s-text>
+        </s-banner>
+      )}
+
+      <s-text-field
+        label="Payment amount"
+        value={amount}
+        onInput={(e) => setAmount(e.target.value)}
+        disabled={status === "loading"}
+      />
+
+      {status === "error" && (
+        <s-banner status="critical">
+          <s-text>{message}</s-text>
+        </s-banner>
+      )}
+
+      <s-grid gridTemplateColumns="1fr auto auto" gap="base">
+        <s-grid-item />
+        <s-grid-item>
+          <s-button
+            onClick={() => setExpanded(false)}
             disabled={status === "loading"}
           >
-            {paymentMethods
-              .filter((m) => !m.expired)
-              .map((m) => (
-                <s-option key={m.id} value={m.id}>
-                  {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
-                </s-option>
-              ))}
-          </s-select>
-        )}
-
-        {paymentMethods.length === 1 && (
-          <s-text>
-            Card: {paymentMethods[0].brand} •••• {paymentMethods[0].lastDigits} ({paymentMethods[0].name})
-          </s-text>
-        )}
-
-        {paymentMethods.length === 0 && (
-          <s-banner status="critical">
-            <s-text>No payment methods found. Please add a card to your account.</s-text>
-          </s-banner>
-        )}
-
-        <s-text-field
-          label="Payment amount"
-          value={amount}
-          onInput={(e) => setAmount(e.target.value)}
-          disabled={status === "loading"}
-        />
-
-        {status === "error" && (
-          <s-banner status="critical">
-            <s-text>{message}</s-text>
-          </s-banner>
-        )}
-
-        <s-grid gridTemplateColumns="1fr auto auto" gap="base">
-          <s-grid-item />
-          <s-grid-item>
-            <s-button
-              onClick={() => setExpanded(false)}
-              disabled={status === "loading"}
-            >
-              {shopify.i18n.translate("notNow")}
-            </s-button>
-          </s-grid-item>
-          <s-grid-item>
-            <s-button
-              variant="primary"
-              onClick={handleSubmit}
-              loading={status === "loading"}
-              disabled={status === "loading" || !amount || !selectedMandateId}
-            >
-              Pay {orderInfo?.currencyCode || ""} {amount || "0.00"}
-            </s-button>
-          </s-grid-item>
-        </s-grid>
-      </s-stack>
-    </s-section>
+            {shopify.i18n.translate("notNow")}
+          </s-button>
+        </s-grid-item>
+        <s-grid-item>
+          <s-button
+            variant="primary"
+            onClick={handleSubmit}
+            loading={status === "loading"}
+            disabled={status === "loading" || !amount || !selectedMandateId}
+          >
+            Pay {formatMoney(amount || "0.00")}
+          </s-button>
+        </s-grid-item>
+      </s-grid>
+    </s-stack>
   );
 }
