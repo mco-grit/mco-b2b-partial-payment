@@ -13,6 +13,23 @@ export default async () => {
   render(<ActionExtension />, document.body);
 };
 
+function t(key, vars) {
+  try {
+    return shopify.i18n.translate(key, vars);
+  } catch (e) {
+    return key;
+  }
+}
+
+function friendlyError(raw) {
+  if (!raw) return t("errorGeneric");
+  const lower = raw.toLowerCase();
+  if (lower.includes("currency") && lower.includes("match")) return t("errorCurrencyMismatch");
+  if (lower.includes("declined") || lower.includes("balance did not decrease")) return t("errorCardDeclined");
+  if (lower.includes("no matching payment method")) return t("errorNoMatchingCard");
+  return raw;
+}
+
 function ActionExtension() {
   const order = useOrder();
   const sessionToken = useSessionToken();
@@ -91,7 +108,7 @@ function ActionExtension() {
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setStatus("error");
-      setMessage("Please enter a valid amount greater than 0.");
+      setMessage(t("enterValidAmountGreaterThanZero"));
       submitting.current = false;
       return;
     }
@@ -99,16 +116,14 @@ function ActionExtension() {
     const outstanding = parseFloat(orderInfo?.outstandingAmount || "0");
     if (parsedAmount > outstanding) {
       setStatus("error");
-      setMessage(
-        `Amount cannot exceed outstanding balance of ${formatMoney(outstanding.toFixed(2))}.`,
-      );
+      setMessage(t("amountExceedsBalance", { amount: formatMoney(outstanding.toFixed(2)) }));
       submitting.current = false;
       return;
     }
 
     if (!selectedMandateId) {
       setStatus("error");
-      setMessage("Please select a payment method.");
+      setMessage(t("selectPaymentMethod"));
       submitting.current = false;
       return;
     }
@@ -141,8 +156,8 @@ function ActionExtension() {
         const orderName = result.order?.name || orderId;
         setMessage(
           result.pending
-            ? result.message || "Payment submitted and is still processing."
-            : `Payment of ${formatMoney(parsedAmount)} applied to order ${orderName}.`,
+            ? t("paymentStillProcessing")
+            : t("paymentApplied", { amount: formatMoney(parsedAmount), orderName }),
         );
         if (result.order?.remainingBalance) {
           setOrderInfo((prev) => ({
@@ -152,15 +167,22 @@ function ActionExtension() {
         }
       } else {
         setStatus("error");
-        setMessage(result.error || "Payment failed. Please try again.");
+        setMessage(friendlyError(result.error) || t("paymentFailed"));
         submitting.current = false;
       }
     } catch (err) {
       setStatus("error");
-      setMessage("An unexpected error occurred. Please try again.");
+      setMessage(t("unexpectedError"));
       submitting.current = false;
     }
   }, [amount, orderId, orderInfo, selectedMandateId, sessionToken]);
+
+  const handleDone = useCallback(() => {
+    setStatus("idle");
+    setMessage("");
+    setExpanded(false);
+    submitting.current = false;
+  }, []);
 
   if (loading) {
     return null;
@@ -178,9 +200,17 @@ function ActionExtension() {
         </s-banner>
         {orderInfo && parseFloat(orderInfo.outstandingAmount) > 0 && (
           <s-text>
-            Remaining balance: {formatMoney(orderInfo.outstandingAmount)}
+            {t("remainingBalance", { amount: formatMoney(orderInfo.outstandingAmount) })}
           </s-text>
         )}
+        <s-grid gridTemplateColumns="1fr auto" gap="base">
+          <s-grid-item />
+          <s-grid-item>
+            <s-button variant="primary" onClick={handleDone}>
+              {t("done")}
+            </s-button>
+          </s-grid-item>
+        </s-grid>
       </s-stack>
     );
   }
@@ -194,7 +224,7 @@ function ActionExtension() {
             variant="primary"
             onClick={() => setExpanded(true)}
           >
-            {shopify.i18n.translate("makeAPayment")}
+            {t("makeAPayment")}
           </s-button>
         </s-grid-item>
       </s-grid>
@@ -205,19 +235,19 @@ function ActionExtension() {
 
   return (
     <s-stack direction="block" gap="base">
-      <s-heading>Pay Invoice</s-heading>
+      <s-heading>{t("payInvoice")}</s-heading>
 
       {orderInfo ? (
         <s-text>
-          Outstanding balance: {formatMoney(orderInfo.outstandingAmount)}
+          {t("outstandingBalance")}: {formatMoney(orderInfo.outstandingAmount)}
         </s-text>
       ) : (
-        <s-text>Could not load order details.</s-text>
+        <s-text>{t("couldNotLoadOrder")}</s-text>
       )}
 
       {paymentMethods.length > 1 && (
         <s-select
-          label="Payment method"
+          label={t("paymentMethod")}
           value={selectedMandateId}
           onChange={(e) => setSelectedMandateId(e.target.value)}
           disabled={status === "loading"}
@@ -226,7 +256,13 @@ function ActionExtension() {
             .filter((m) => !m.expired)
             .map((m) => (
               <s-option key={m.id} value={m.id}>
-                {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
+                {t("cardSelectOption", {
+                  brand: m.brand,
+                  digits: m.lastDigits,
+                  name: m.name,
+                  expiryMonth: m.expiryMonth,
+                  expiryYear: m.expiryYear,
+                })}
               </s-option>
             ))}
         </s-select>
@@ -234,18 +270,22 @@ function ActionExtension() {
 
       {paymentMethods.length === 1 && (
         <s-text>
-          Card: {paymentMethods[0].brand} •••• {paymentMethods[0].lastDigits} ({paymentMethods[0].name})
+          {t("cardDisplay", {
+            brand: paymentMethods[0].brand,
+            digits: paymentMethods[0].lastDigits,
+            name: paymentMethods[0].name,
+          })}
         </s-text>
       )}
 
       {paymentMethods.length === 0 && (
         <s-banner status="critical">
-          <s-text>No payment methods found. Please add a card to your account.</s-text>
+          <s-text>{t("noPaymentMethodsAction")}</s-text>
         </s-banner>
       )}
 
       <s-text-field
-        label="Payment amount"
+        label={t("paymentAmount")}
         value={amount}
         onInput={(e) => setAmount(e.target.value)}
         disabled={status === "loading"}
@@ -257,6 +297,12 @@ function ActionExtension() {
         </s-banner>
       )}
 
+      {status === "loading" && (
+        <s-banner status="warning">
+          <s-text>{t("processingPayment")}</s-text>
+        </s-banner>
+      )}
+
       <s-grid gridTemplateColumns="1fr auto auto" gap="base">
         <s-grid-item />
         <s-grid-item>
@@ -264,7 +310,7 @@ function ActionExtension() {
             onClick={() => setExpanded(false)}
             disabled={status === "loading"}
           >
-            {shopify.i18n.translate("notNow")}
+            {t("notNow")}
           </s-button>
         </s-grid-item>
         <s-grid-item>
@@ -274,7 +320,7 @@ function ActionExtension() {
             loading={status === "loading"}
             disabled={status === "loading" || !amount || !selectedMandateId}
           >
-            Pay {formatMoney(amount || "0.00")}
+            {t("payAmount", { amount: formatMoney(amount || "0.00") })}
           </s-button>
         </s-grid-item>
       </s-grid>
