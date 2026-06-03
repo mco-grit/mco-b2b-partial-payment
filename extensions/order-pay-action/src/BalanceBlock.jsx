@@ -9,6 +9,26 @@ export default async () => {
   render(<BalanceBlock />, document.body);
 };
 
+function t(key, vars) {
+  try {
+    return shopify.i18n.translate(key, vars);
+  } catch (e) {
+    return key;
+  }
+}
+
+function friendlyError(raw) {
+  if (!raw) return t("errorGeneric");
+  const lower = raw.toLowerCase();
+  if (lower.includes("currency") && lower.includes("match")) return t("errorCurrencyMismatch");
+  if (lower.includes("declined") || lower.includes("balance did not decrease")) return t("errorCardDeclined");
+  if (lower.includes("no matching payment method")) return t("errorNoMatchingCard");
+  if (lower.includes("job not found") || lower.includes("no job")) return t("errorGeneric");
+  // If it looks like a raw API message (long, technical), replace it
+  if (raw.length > 80 || /[A-Z]{2,}/.test(raw)) return t("errorGeneric");
+  return raw;
+}
+
 // Mirror of server-side allocation in api.batch-pay.js
 function allocate(orders, requestedAmount) {
   const total = orders.reduce((s, o) => s + parseFloat(o.outstanding), 0);
@@ -19,7 +39,12 @@ function allocate(orders, requestedAmount) {
     const out = parseFloat(o.outstanding);
     const applied = Math.min(out, remaining);
     if (applied > 0) {
-      allocations.push({ orderId: o.id, name: o.name, applied: applied.toFixed(2) });
+      allocations.push({
+        orderId: o.id,
+        name: o.name,
+        applied: applied.toFixed(2),
+        remainingOnOrder: (out - applied).toFixed(2),
+      });
       remaining -= applied;
     }
   }
@@ -54,15 +79,23 @@ function BalanceBlock() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setError(data.error || "Failed to load balance");
+        setError(data.error || t("failedToLoadBalance"));
         return;
       }
       setInfo(data);
       const validMethod = (data.paymentMethods || []).find((m) => !m.expired);
       if (validMethod) setPaymentMethodId(validMethod.fingerprint || validMethod.id);
-      setAmount(parseFloat(data.totalOutstanding) > 0 ? data.totalOutstanding : "");
+      // Pre-fill with overdue balance if > 0, otherwise total outstanding
+      const overdue = parseFloat(data.overdueOutstanding);
+      if (overdue > 0) {
+        setAmount(data.overdueOutstanding);
+      } else if (parseFloat(data.totalOutstanding) > 0) {
+        setAmount(data.totalOutstanding);
+      } else {
+        setAmount("");
+      }
     } catch (e) {
-      setError("Failed to load balance");
+      setError(t("failedToLoadBalance"));
     } finally {
       setLoading(false);
     }
@@ -110,11 +143,11 @@ function BalanceBlock() {
     if (submitting) return;
     const parsed = parseFloat(amount);
     if (isNaN(parsed) || parsed <= 0) {
-      setError("Enter a valid amount");
+      setError(t("enterValidAmount"));
       return;
     }
     if (!paymentMethodId) {
-      setError("Select a payment method");
+      setError(t("selectPaymentMethod"));
       return;
     }
     setSubmitting(true);
@@ -137,14 +170,14 @@ function BalanceBlock() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setError(data.error || "Payment failed");
+        setError(friendlyError(data.error));
         setSubmitting(false);
         return;
       }
       setResults(data.results || []);
       setSubmitting(false);
     } catch (e) {
-      setError("Payment failed");
+      setError(t("paymentFailed"));
       setSubmitting(false);
     }
   }, [amount, paymentMethodId, sessionToken, submitting]);
@@ -187,8 +220,8 @@ function BalanceBlock() {
   if (!info || parseFloat(info.totalOutstanding) <= 0) {
     return (
       <s-section>
-        <s-heading>Outstanding balance</s-heading>
-        <s-text>You have no outstanding orders.</s-text>
+        <s-heading>{t("outstandingBalance")}</s-heading>
+        <s-text>{t("noOutstandingOrders")}</s-text>
       </s-section>
     );
   }
@@ -197,21 +230,23 @@ function BalanceBlock() {
   if (!expanded) {
     return (
       <s-section>
-        <s-heading>Outstanding balance</s-heading>
+        <s-heading>{t("outstandingBalance")}</s-heading>
         <s-stack direction="block" gap="base">
           <s-text>
-            Balance: {formatMoney(info.totalOutstanding)}
+            {t("balance", { amount: formatMoney(info.totalOutstanding) })}
           </s-text>
           {parseFloat(info.overdueOutstanding) > 0 && (
             <s-text>
-              Overdue: {formatMoney(info.overdueOutstanding)}
+              {t("overdue", { amount: formatMoney(info.overdueOutstanding) })}
             </s-text>
           )}
           <s-text>
-            {info.orders.length} open order{info.orders.length === 1 ? "" : "s"}
+            {info.orders.length === 1
+              ? t("openOrders", { count: info.orders.length })
+              : t("openOrdersPlural", { count: info.orders.length })}
           </s-text>
           <s-button variant="primary" onClick={() => setExpanded(true)}>
-            Pay outstanding balance
+            {t("payOutstandingBalance")}
           </s-button>
         </s-stack>
       </s-section>
@@ -224,26 +259,33 @@ function BalanceBlock() {
     const failed = results.filter((r) => r.status === "failed");
     const pending = results.filter((r) => r.status === "pending");
     const successTotal = succeeded.reduce((s, r) => s + parseFloat(r.applied), 0).toFixed(2);
+    const allFailed = succeeded.length === 0 && failed.length > 0;
+
     return (
       <s-section>
-        <s-heading>Payment results</s-heading>
+        <s-heading>{t("paymentResults")}</s-heading>
         <s-stack direction="block" gap="base">
           <s-text>
-            {succeeded.length} succeeded ({formatMoney(successTotal)})
-            {failed.length > 0 ? `, ${failed.length} failed` : ""}
-            {pending.length > 0 ? `, ${pending.length} pending` : ""}
+            {t("succeededCount", { count: succeeded.length, amount: formatMoney(successTotal) })}
+            {failed.length > 0 ? `, ${t("failedCount", { count: failed.length })}` : ""}
+            {pending.length > 0 ? `, ${t("pendingCount", { count: pending.length })}` : ""}
           </s-text>
 
           {failed.length > 0 && (
             <s-stack direction="block" gap="tight">
-              <s-text>Failed:</s-text>
+              {allFailed && (
+                <s-banner status="critical">
+                  <s-text>{t("overallPaymentError")}</s-text>
+                </s-banner>
+              )}
+              <s-text>{t("failedLabel")}</s-text>
               {failed.slice(0, 10).map((r) => (
                 <s-text key={r.orderId}>
-                  ✗ {r.name}: {r.error || "unknown error"}
+                  {t("failedItem", { name: r.name, error: friendlyError(r.error) })}
                 </s-text>
               ))}
               {failed.length > 10 && (
-                <s-text>...and {failed.length - 10} more</s-text>
+                <s-text>{t("andMore", { count: failed.length - 10 })}</s-text>
               )}
             </s-stack>
           )}
@@ -252,10 +294,10 @@ function BalanceBlock() {
             <s-stack direction="block" gap="tight">
               {succeeded.map((r) => (
                 <s-text key={r.orderId}>
-                  ✓ {r.name}: {formatMoney(r.applied)} applied
+                  {t("succeededItem", { name: r.name, amount: formatMoney(r.applied) })}
                   {r.remainingOutstanding && parseFloat(r.remainingOutstanding) > 0
-                    ? ` — ${formatMoney(r.remainingOutstanding)} remaining`
-                    : " — fully paid"}
+                    ? ` — ${t("remainingOnOrder", { amount: formatMoney(r.remainingOutstanding) })}`
+                    : ` — ${t("fullyPaid")}`}
                 </s-text>
               ))}
             </s-stack>
@@ -266,13 +308,13 @@ function BalanceBlock() {
             {failed.length > 0 && (
               <s-grid-item>
                 <s-button onClick={handleRetry}>
-                  Retry failed
+                  {allFailed ? t("retry") : t("retryFailed")}
                 </s-button>
               </s-grid-item>
             )}
             <s-grid-item>
               <s-button variant="primary" onClick={handleCollapse}>
-                Done
+                {t("done")}
               </s-button>
             </s-grid-item>
           </s-grid>
@@ -286,27 +328,34 @@ function BalanceBlock() {
 
   return (
     <s-section>
-      <s-heading>Pay outstanding balance</s-heading>
+      <s-heading>{t("payOutstandingBalance")}</s-heading>
 
       <s-stack direction="block" gap="base">
         <s-text>
-          Total outstanding: {formatMoney(info.totalOutstanding)} across{" "}
-          {info.orders.length} order{info.orders.length === 1 ? "" : "s"}
+          {info.orders.length === 1
+            ? t("totalOutstandingAcross", { amount: formatMoney(info.totalOutstanding), count: info.orders.length })
+            : t("totalOutstandingAcrossPlural", { amount: formatMoney(info.totalOutstanding), count: info.orders.length })}
           {parseFloat(info.overdueOutstanding) > 0
-            ? ` (${formatMoney(info.overdueOutstanding)} overdue)`
+            ? ` ${t("overdueParenthetical", { amount: formatMoney(info.overdueOutstanding) })}`
             : ""}
         </s-text>
 
         {validMethods.length > 1 && (
           <s-select
-            label="Payment method"
+            label={t("paymentMethod")}
             value={paymentMethodId}
             onChange={(e) => setPaymentMethodId(e.target.value)}
             disabled={submitting}
           >
             {validMethods.map((m) => (
               <s-option key={m.fingerprint || m.id} value={m.fingerprint || m.id}>
-                {m.brand} •••• {m.lastDigits} ({m.name}, exp {m.expiryMonth}/{m.expiryYear})
+                {t("cardSelectOption", {
+                  brand: m.brand,
+                  digits: m.lastDigits,
+                  name: m.name,
+                  expiryMonth: m.expiryMonth,
+                  expiryYear: m.expiryYear,
+                })}
               </s-option>
             ))}
           </s-select>
@@ -314,18 +363,22 @@ function BalanceBlock() {
 
         {validMethods.length === 1 && (
           <s-text>
-            Card: {validMethods[0].brand} •••• {validMethods[0].lastDigits} ({validMethods[0].name})
+            {t("cardDisplay", {
+              brand: validMethods[0].brand,
+              digits: validMethods[0].lastDigits,
+              name: validMethods[0].name,
+            })}
           </s-text>
         )}
 
         {validMethods.length === 0 && (
           <s-banner status="critical">
-            <s-text>No payment methods available.</s-text>
+            <s-text>{t("noPaymentMethods")}</s-text>
           </s-banner>
         )}
 
         <s-text-field
-          label="Amount to pay"
+          label={t("amountToPay")}
           value={amount}
           onInput={(e) => {
             const v = e.target.value;
@@ -342,14 +395,20 @@ function BalanceBlock() {
 
         {allocations.length > 0 && (
           <s-stack direction="block" gap="tight">
-            <s-text>Allocation ({allocations.length} orders):</s-text>
+            <s-text>{t("allocationLabel", { count: allocations.length })}</s-text>
             {allocations.slice(0, 5).map((a) => (
               <s-text key={a.orderId}>
-                {formatMoney(a.applied)} → {a.name}
+                {parseFloat(a.remainingOnOrder) > 0
+                  ? t("allocationItemWithRemaining", {
+                      amount: formatMoney(a.applied),
+                      name: a.name,
+                      remaining: formatMoney(a.remainingOnOrder),
+                    })
+                  : t("allocationItem", { amount: formatMoney(a.applied), name: a.name })}
               </s-text>
             ))}
             {allocations.length > 5 && (
-              <s-text>...and {allocations.length - 5} more orders</s-text>
+              <s-text>{t("andMoreOrders", { count: allocations.length - 5 })}</s-text>
             )}
           </s-stack>
         )}
@@ -362,13 +421,13 @@ function BalanceBlock() {
 
         {submitting && (
           <s-banner status="warning">
-            <s-text>Payment is being processed. Please do not leave this page.</s-text>
+            <s-text>{t("processingPayment")}</s-text>
           </s-banner>
         )}
 
         <s-stack direction="inline" gap="base">
           <s-button onClick={handleCancel} disabled={submitting}>
-            Not now
+            {t("notNow")}
           </s-button>
           <s-button
             variant="primary"
@@ -376,7 +435,7 @@ function BalanceBlock() {
             loading={submitting}
             disabled={submitting || !amount || !paymentMethodId}
           >
-            Pay {formatMoney(amount || "0.00")}
+            {t("payAmount", { amount: formatMoney(amount || "0.00") })}
           </s-button>
         </s-stack>
       </s-stack>
