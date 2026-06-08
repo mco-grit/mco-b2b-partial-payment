@@ -4,8 +4,8 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "preact/hooks"
 import {
   useOrder,
   useSessionToken,
-  useExtension,
 } from "@shopify/ui-extensions/customer-account/preact";
+import { useTranslations } from "./translations.js";
 
 const APP_URL = "https://mco-b2b-partial-payment.onrender.com";
 
@@ -13,27 +13,19 @@ export default async () => {
   render(<ActionExtension />, document.body);
 };
 
-function t(key, vars) {
-  try {
-    return shopify.i18n.translate(key, vars);
-  } catch (e) {
-    return key;
-  }
-}
-
-function friendlyError(raw) {
-  if (!raw) return t("errorGeneric");
+function friendlyError(raw, t) {
+  if (!raw) return t("partial_pay_error_generic");
   const lower = raw.toLowerCase();
-  if (lower.includes("currency") && lower.includes("match")) return t("errorCurrencyMismatch");
-  if (lower.includes("declined") || lower.includes("balance did not decrease")) return t("errorCardDeclined");
-  if (lower.includes("no matching payment method")) return t("errorNoMatchingCard");
+  if (lower.includes("currency") && lower.includes("match")) return t("partial_pay_error_currency_mismatch");
+  if (lower.includes("declined") || lower.includes("balance did not decrease")) return t("partial_pay_error_card_declined");
+  if (lower.includes("no matching payment method")) return t("partial_pay_error_no_matching_card");
   return raw;
 }
 
 function ActionExtension() {
   const order = useOrder();
   const sessionToken = useSessionToken();
-  const ext = useExtension();
+  const t = useTranslations(APP_URL, () => sessionToken.get());
 
   const orderId = order?.id;
   const submitting = useRef(false);
@@ -108,7 +100,7 @@ function ActionExtension() {
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       setStatus("error");
-      setMessage(t("enterValidAmountGreaterThanZero"));
+      setMessage(t("partial_pay_enter_valid_amount_gt_zero"));
       submitting.current = false;
       return;
     }
@@ -116,14 +108,14 @@ function ActionExtension() {
     const outstanding = parseFloat(orderInfo?.outstandingAmount || "0");
     if (parsedAmount > outstanding) {
       setStatus("error");
-      setMessage(t("amountExceedsBalance", { amount: formatMoney(outstanding.toFixed(2)) }));
+      setMessage(t("partial_pay_amount_exceeds_balance", { amount: formatMoney(outstanding.toFixed(2)) }));
       submitting.current = false;
       return;
     }
 
     if (!selectedMandateId) {
       setStatus("error");
-      setMessage(t("selectPaymentMethod"));
+      setMessage(t("partial_pay_select_payment_method"));
       submitting.current = false;
       return;
     }
@@ -143,7 +135,7 @@ function ActionExtension() {
         body: JSON.stringify({
           orderId,
           amount: parsedAmount.toFixed(2),
-          currencyCode: orderInfo?.currencyCode || "GBP",
+          currencyCode: orderInfo?.currencyCode,
           mandateId: selectedMandateId,
           action: "pay",
         }),
@@ -156,8 +148,8 @@ function ActionExtension() {
         const orderName = result.order?.name || orderId;
         setMessage(
           result.pending
-            ? t("paymentStillProcessing")
-            : t("paymentApplied", { amount: formatMoney(parsedAmount), orderName }),
+            ? t("partial_pay_payment_still_processing")
+            : t("partial_pay_payment_applied", { amount: formatMoney(parsedAmount), orderName }),
         );
         if (result.order?.remainingBalance) {
           setOrderInfo((prev) => ({
@@ -167,15 +159,15 @@ function ActionExtension() {
         }
       } else {
         setStatus("error");
-        setMessage(friendlyError(result.error) || t("paymentFailed"));
+        setMessage(friendlyError(result.error, t) || t("partial_pay_payment_failed"));
         submitting.current = false;
       }
     } catch (err) {
       setStatus("error");
-      setMessage(t("unexpectedError"));
+      setMessage(t("partial_pay_unexpected_error"));
       submitting.current = false;
     }
-  }, [amount, orderId, orderInfo, selectedMandateId, sessionToken]);
+  }, [amount, orderId, orderInfo, selectedMandateId, sessionToken, t]);
 
   const handleDone = useCallback(() => {
     setStatus("idle");
@@ -195,19 +187,19 @@ function ActionExtension() {
   if (status === "success") {
     return (
       <s-stack direction="block" gap="base">
-        <s-banner status="success">
+        <s-banner tone="success">
           <s-text>{message}</s-text>
         </s-banner>
         {orderInfo && parseFloat(orderInfo.outstandingAmount) > 0 && (
           <s-text>
-            {t("remainingBalance", { amount: formatMoney(orderInfo.outstandingAmount) })}
+            {t("partial_pay_remaining_balance", { amount: formatMoney(orderInfo.outstandingAmount) })}
           </s-text>
         )}
         <s-grid gridTemplateColumns="1fr auto" gap="base">
           <s-grid-item />
           <s-grid-item>
             <s-button variant="primary" onClick={handleDone}>
-              {t("done")}
+              {t("partial_pay_done")}
             </s-button>
           </s-grid-item>
         </s-grid>
@@ -224,7 +216,7 @@ function ActionExtension() {
             variant="primary"
             onClick={() => setExpanded(true)}
           >
-            {t("makeAPayment")}
+            {t("partial_pay_make_a_payment")}
           </s-button>
         </s-grid-item>
       </s-grid>
@@ -235,19 +227,19 @@ function ActionExtension() {
 
   return (
     <s-stack direction="block" gap="base">
-      <s-heading>{t("payInvoice")}</s-heading>
+      <s-heading>{t("partial_pay_pay_invoice")}</s-heading>
 
       {orderInfo ? (
         <s-text>
-          {t("outstandingBalance")}: {formatMoney(orderInfo.outstandingAmount)}
+          {t("partial_pay_outstanding_balance")}: {formatMoney(orderInfo.outstandingAmount)}
         </s-text>
       ) : (
-        <s-text>{t("couldNotLoadOrder")}</s-text>
+        <s-text>{t("partial_pay_could_not_load_order")}</s-text>
       )}
 
       {paymentMethods.length > 1 && (
         <s-select
-          label={t("paymentMethod")}
+          label={t("partial_pay_payment_method")}
           value={selectedMandateId}
           onChange={(e) => setSelectedMandateId(e.target.value)}
           disabled={status === "loading"}
@@ -256,7 +248,7 @@ function ActionExtension() {
             .filter((m) => !m.expired)
             .map((m) => (
               <s-option key={m.id} value={m.id}>
-                {t("cardSelectOption", {
+                {t("partial_pay_card_select_option", {
                   brand: m.brand,
                   digits: m.lastDigits,
                   name: m.name,
@@ -270,7 +262,7 @@ function ActionExtension() {
 
       {paymentMethods.length === 1 && (
         <s-text>
-          {t("cardDisplay", {
+          {t("partial_pay_card_display", {
             brand: paymentMethods[0].brand,
             digits: paymentMethods[0].lastDigits,
             name: paymentMethods[0].name,
@@ -279,27 +271,27 @@ function ActionExtension() {
       )}
 
       {paymentMethods.length === 0 && (
-        <s-banner status="critical">
-          <s-text>{t("noPaymentMethodsAction")}</s-text>
+        <s-banner tone="critical">
+          <s-text>{t("partial_pay_no_payment_methods_action")}</s-text>
         </s-banner>
       )}
 
       <s-text-field
-        label={t("paymentAmount")}
+        label={t("partial_pay_payment_amount")}
         value={amount}
         onInput={(e) => setAmount(e.target.value)}
         disabled={status === "loading"}
       />
 
       {status === "error" && (
-        <s-banner status="critical">
+        <s-banner tone="critical">
           <s-text>{message}</s-text>
         </s-banner>
       )}
 
       {status === "loading" && (
-        <s-banner status="warning">
-          <s-text>{t("processingPayment")}</s-text>
+        <s-banner tone="warning">
+          <s-text>{t("partial_pay_processing_payment")}</s-text>
         </s-banner>
       )}
 
@@ -310,7 +302,7 @@ function ActionExtension() {
             onClick={() => setExpanded(false)}
             disabled={status === "loading"}
           >
-            {t("notNow")}
+            {t("partial_pay_not_now")}
           </s-button>
         </s-grid-item>
         <s-grid-item>
@@ -320,7 +312,7 @@ function ActionExtension() {
             loading={status === "loading"}
             disabled={status === "loading" || !amount || !selectedMandateId}
           >
-            {t("payAmount", { amount: formatMoney(amount || "0.00") })}
+            {t("partial_pay_pay_amount", { amount: formatMoney(amount || "0.00") })}
           </s-button>
         </s-grid-item>
       </s-grid>
