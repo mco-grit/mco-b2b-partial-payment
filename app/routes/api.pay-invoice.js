@@ -45,7 +45,7 @@ export async function action({ request }) {
             name
             displayFinancialStatus
             totalOutstandingSet {
-              shopMoney {
+              presentmentMoney {
                 amount
                 currencyCode
               }
@@ -70,7 +70,9 @@ export async function action({ request }) {
     }
 
     const order = orderData.data.order;
-    const outstandingMoney = order.totalOutstandingSet?.shopMoney;
+    // presentmentMoney = the order's own currency (CZK/EUR), required by the payment
+    // mandate. shopMoney (store currency, GBP) caused GRIT-5507.
+    const outstandingMoney = order.totalOutstandingSet?.presentmentMoney;
 
     // --- GET INFO ---
     if (requestAction === "get-info") {
@@ -121,7 +123,7 @@ export async function action({ request }) {
           name: order.name,
           financialStatus: order.displayFinancialStatus,
           outstandingAmount: outstandingMoney?.amount || "0",
-          currencyCode: outstandingMoney?.currencyCode || "GBP",
+          currencyCode: outstandingMoney?.currencyCode || "",
           paymentMethods,
         },
       }, 200, corsHeaders);
@@ -250,7 +252,7 @@ export async function action({ request }) {
             name
             displayFinancialStatus
             totalOutstandingSet {
-              shopMoney {
+              presentmentMoney {
                 amount
                 currencyCode
               }
@@ -324,7 +326,7 @@ export async function action({ request }) {
           id: updatedOrder?.id,
           name: updatedOrder?.name,
           financialStatus: updatedOrder?.displayFinancialStatus,
-          remainingBalance: updatedOrder?.totalOutstandingSet?.shopMoney,
+          remainingBalance: updatedOrder?.totalOutstandingSet?.presentmentMoney,
         },
       }, 200, corsHeaders);
     }
@@ -343,7 +345,9 @@ export async function action({ request }) {
       try {
         const body = await error.response.json?.();
         console.error("Error response body:", JSON.stringify(body, null, 2));
-      } catch {}
+      } catch {
+        // ignore — best-effort error logging
+      }
     }
     return jsonResponse({ error: "Internal server error" }, 500, corsHeaders);
   }

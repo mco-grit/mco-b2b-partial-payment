@@ -273,7 +273,7 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
                 name
                 processedAt
                 displayFinancialStatus
-                totalOutstandingSet { shopMoney { amount currencyCode } }
+                totalOutstandingSet { presentmentMoney { amount currencyCode } }
                 paymentTerms {
                   paymentSchedules(first: 1) {
                     nodes { dueAt }
@@ -325,10 +325,12 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
   let aggregatedMethods = new Map();
 
   const rawOrders = allNodes
-    .filter((o) => parseFloat(o.totalOutstandingSet?.shopMoney?.amount || "0") > 0)
+    .filter((o) => parseFloat(o.totalOutstandingSet?.presentmentMoney?.amount || "0") > 0)
     .map((o) => {
-      const outstanding = o.totalOutstandingSet.shopMoney.amount;
-      currencyCode = o.totalOutstandingSet.shopMoney.currencyCode || currencyCode;
+      const outstanding = o.totalOutstandingSet.presentmentMoney.amount;
+      // Use the order's presentment currency (what the buyer owes, e.g. CZK/EUR),
+      // not shopMoney (store currency, GBP) — required by orderCreateMandatePayment.
+      currencyCode = o.totalOutstandingSet.presentmentMoney.currencyCode || currencyCode;
       // Collect per-order vaulted methods and aggregate by card fingerprint for the dropdown
       const orderMethods = (o.paymentCollectionDetails?.vaultedPaymentMethods || []).map((m) => ({
         id: m.id,
@@ -410,7 +412,6 @@ async function payOneOrder({
   mandateId,
   amount,
   currencyCode,
-  companyLocationId,
   attempt,
   sessionId,
   outstandingBefore,
@@ -494,13 +495,13 @@ async function payOneOrder({
       `#graphql
       query VerifyPayment($orderId: ID!) {
         order(id: $orderId) {
-          totalOutstandingSet { shopMoney { amount } }
+          totalOutstandingSet { presentmentMoney { amount } }
         }
       }`,
       { variables: { orderId } },
     );
     const verifyData = await verifyResponse.json();
-    const remainingOutstanding = verifyData.data?.order?.totalOutstandingSet?.shopMoney?.amount || "0";
+    const remainingOutstanding = verifyData.data?.order?.totalOutstandingSet?.presentmentMoney?.amount || "0";
     const before = parseFloat(outstandingBefore || "0");
     const after = parseFloat(remainingOutstanding);
 

@@ -135,7 +135,7 @@ function ActionExtension() {
         body: JSON.stringify({
           orderId,
           amount: parsedAmount.toFixed(2),
-          currencyCode: orderInfo?.currencyCode || "GBP",
+          currencyCode: orderInfo?.currencyCode,
           mandateId: selectedMandateId,
           action: "pay",
         }),
