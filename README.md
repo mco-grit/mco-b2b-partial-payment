@@ -68,6 +68,22 @@ This template comes pre-configured with examples of:
 
 Please read the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) to see what other API's are available.
 
+## Translations
+
+The partial-payment extension's UI strings are translated via the shared **"Rep Dashboard Translations"** metaobject (managed in the Translate & Adapt app), with the extension's bundled `locales/*.json` as the offline fallback. The backend reads the metaobject in `app/routes/api.translations.js`; the extension resolves strings in `extensions/order-pay-action/src/translations.js`.
+
+To create the metaobject entries for these strings (`partial_pay_*` namespace), run the idempotent seed script:
+
+```bash
+# Preview (writes nothing) — verifies the metaobject definition and lists planned entries
+SHOP=<shop>.myshopify.com SHOPIFY_ADMIN_TOKEN=<token> npm run seed:translations
+
+# Create the entries (skips any that already exist)
+SHOP=<shop>.myshopify.com SHOPIFY_ADMIN_TOKEN=<token> npm run seed:translations -- --commit
+```
+
+The token needs `write_metaobjects`. Re-run after adding new strings — it only creates the missing ones. Never commit a token.
+
 ## Shopify Dev MCP
 
 This template is configured with the Shopify Dev MCP. This instructs [Cursor](https://cursor.com/), [GitHub Copilot](https://github.com/features/copilot) and [Claude Code](https://claude.com/product/claude-code) and [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) to use the Shopify Dev MCP.
