@@ -2,6 +2,7 @@ import "@shopify/ui-extensions/preact";
 import { render } from "preact";
 import { useState, useEffect, useCallback, useRef, useMemo } from "preact/hooks";
 import { useSessionToken } from "@shopify/ui-extensions/customer-account/preact";
+import { useTranslations } from "./translations.js";
 
 const APP_URL = "https://mco-b2b-partial-payment.onrender.com";
 
@@ -9,23 +10,15 @@ export default async () => {
   render(<BalanceBlock />, document.body);
 };
 
-function t(key, vars) {
-  try {
-    return shopify.i18n.translate(key, vars);
-  } catch (e) {
-    return key;
-  }
-}
-
-function friendlyError(raw) {
-  if (!raw) return t("errorGeneric");
+function friendlyError(raw, t) {
+  if (!raw) return t("partial_pay_error_generic");
   const lower = raw.toLowerCase();
-  if (lower.includes("currency") && lower.includes("match")) return t("errorCurrencyMismatch");
-  if (lower.includes("declined") || lower.includes("balance did not decrease")) return t("errorCardDeclined");
-  if (lower.includes("no matching payment method")) return t("errorNoMatchingCard");
-  if (lower.includes("job not found") || lower.includes("no job")) return t("errorGeneric");
+  if (lower.includes("currency") && lower.includes("match")) return t("partial_pay_error_currency_mismatch");
+  if (lower.includes("declined") || lower.includes("balance did not decrease")) return t("partial_pay_error_card_declined");
+  if (lower.includes("no matching payment method")) return t("partial_pay_error_no_matching_card");
+  if (lower.includes("job not found") || lower.includes("no job")) return t("partial_pay_error_generic");
   // If it looks like a raw API message (long, technical), replace it
-  if (raw.length > 80 || /[A-Z]{2,}/.test(raw)) return t("errorGeneric");
+  if (raw.length > 80 || /[A-Z]{2,}/.test(raw)) return t("partial_pay_error_generic");
   return raw;
 }
 
@@ -53,6 +46,7 @@ function allocate(orders, requestedAmount) {
 
 function BalanceBlock() {
   const sessionToken = useSessionToken();
+  const t = useTranslations(APP_URL, () => sessionToken.get());
 
   const [loading, setLoading] = useState(true);
   const [info, setInfo] = useState(null);
@@ -79,7 +73,7 @@ function BalanceBlock() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setError(data.error || t("failedToLoadBalance"));
+        setError(data.error || t("partial_pay_failed_to_load_balance"));
         return;
       }
       setInfo(data);
@@ -95,11 +89,11 @@ function BalanceBlock() {
         setAmount("");
       }
     } catch (e) {
-      setError(t("failedToLoadBalance"));
+      setError(t("partial_pay_failed_to_load_balance"));
     } finally {
       setLoading(false);
     }
-  }, [sessionToken]);
+  }, [sessionToken, t]);
 
   useEffect(() => {
     fetchInfo();
@@ -139,15 +133,25 @@ function BalanceBlock() {
     };
   }, [info?.currencyCode]);
 
+  // Step 2 of the ticket uses currency codes (e.g. "66.80 GBP") rather than symbols
+  const formatCode = useMemo(() => {
+    const currency = info?.currencyCode || "";
+    return (v) => {
+      const n = parseFloat(v);
+      if (isNaN(n)) return String(v);
+      return currency ? `${n.toFixed(2)} ${currency}` : n.toFixed(2);
+    };
+  }, [info?.currencyCode]);
+
   const handleSubmit = useCallback(async () => {
     if (submitting) return;
     const parsed = parseFloat(amount);
     if (isNaN(parsed) || parsed <= 0) {
-      setError(t("enterValidAmount"));
+      setError(t("partial_pay_enter_valid_amount"));
       return;
     }
     if (!paymentMethodId) {
-      setError(t("selectPaymentMethod"));
+      setError(t("partial_pay_select_payment_method"));
       return;
     }
     setSubmitting(true);
@@ -170,17 +174,17 @@ function BalanceBlock() {
       });
       const data = await response.json();
       if (!response.ok) {
-        setError(friendlyError(data.error));
+        setError(friendlyError(data.error, t));
         setSubmitting(false);
         return;
       }
       setResults(data.results || []);
       setSubmitting(false);
     } catch (e) {
-      setError(t("paymentFailed"));
+      setError(t("partial_pay_payment_failed"));
       setSubmitting(false);
     }
-  }, [amount, paymentMethodId, sessionToken, submitting]);
+  }, [amount, paymentMethodId, sessionToken, submitting, t]);
 
   const handleRetry = useCallback(async () => {
     attemptRef.current += 1;
@@ -210,7 +214,7 @@ function BalanceBlock() {
   if (error && !info) {
     return (
       <s-section>
-        <s-banner status="critical">
+        <s-banner tone="critical">
           <s-text>{error}</s-text>
         </s-banner>
       </s-section>
@@ -220,8 +224,12 @@ function BalanceBlock() {
   if (!info || parseFloat(info.totalOutstanding) <= 0) {
     return (
       <s-section>
-        <s-heading>{t("outstandingBalance")}</s-heading>
-        <s-text>{t("noOutstandingOrders")}</s-text>
+        <s-heading>{t("partial_pay_outstanding_balance")}</s-heading>
+        <s-stack direction="block" gap="base" alignItems="center">
+          <s-icon type="check-circle" tone="neutral" size="large"></s-icon>
+          <s-text type="strong">{t("partial_pay_nothing_to_pay")}</s-text>
+          <s-text color="subdued">{t("partial_pay_no_outstanding_balance")}</s-text>
+        </s-stack>
       </s-section>
     );
   }
@@ -230,23 +238,31 @@ function BalanceBlock() {
   if (!expanded) {
     return (
       <s-section>
-        <s-heading>{t("outstandingBalance")}</s-heading>
+        <s-heading>{t("partial_pay_outstanding_balance")}</s-heading>
         <s-stack direction="block" gap="base">
-          <s-text>
-            {t("balance", { amount: formatMoney(info.totalOutstanding) })}
-          </s-text>
+          <s-box padding="base" background="subdued" borderRadius="base">
+            <s-stack direction="block" gap="small">
+              <s-text type="small" color="subdued">
+                {t("partial_pay_total_outstanding")}
+              </s-text>
+              <s-heading>{formatMoney(info.totalOutstanding)}</s-heading>
+            </s-stack>
+          </s-box>
           {parseFloat(info.overdueOutstanding) > 0 && (
-            <s-text>
-              {t("overdue", { amount: formatMoney(info.overdueOutstanding) })}
-            </s-text>
+            <s-stack direction="inline" gap="small" alignItems="center">
+              <s-icon type="alert-triangle" tone="critical"></s-icon>
+              <s-text tone="critical">
+                {t("partial_pay_overdue_warning", { amount: formatMoney(info.overdueOutstanding) })}
+              </s-text>
+            </s-stack>
           )}
-          <s-text>
+          <s-text color="subdued">
             {info.orders.length === 1
-              ? t("openOrders", { count: info.orders.length })
-              : t("openOrdersPlural", { count: info.orders.length })}
+              ? t("partial_pay_open_orders_one", { count: info.orders.length })
+              : t("partial_pay_open_orders_other", { count: info.orders.length })}
           </s-text>
           <s-button variant="primary" onClick={() => setExpanded(true)}>
-            {t("payOutstandingBalance")}
+            {t("partial_pay_pay_outstanding_balance")}
           </s-button>
         </s-stack>
       </s-section>
@@ -259,65 +275,95 @@ function BalanceBlock() {
     const failed = results.filter((r) => r.status === "failed");
     const pending = results.filter((r) => r.status === "pending");
     const successTotal = succeeded.reduce((s, r) => s + parseFloat(r.applied), 0).toFixed(2);
+    const failedTotal = failed.reduce((s, r) => s + parseFloat(r.applied || 0), 0).toFixed(2);
     const allFailed = succeeded.length === 0 && failed.length > 0;
+    const allSuccess = failed.length === 0 && pending.length === 0;
+    const badgeLabel = allSuccess
+      ? t("partial_pay_badge_paid")
+      : allFailed
+        ? t("partial_pay_badge_failed")
+        : t("partial_pay_badge_partial");
 
     return (
       <s-section>
-        <s-heading>{t("paymentResults")}</s-heading>
         <s-stack direction="block" gap="base">
-          <s-text>
-            {t("succeededCount", { count: succeeded.length, amount: formatMoney(successTotal) })}
-            {failed.length > 0 ? `, ${t("failedCount", { count: failed.length })}` : ""}
-            {pending.length > 0 ? `, ${t("pendingCount", { count: pending.length })}` : ""}
-          </s-text>
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-heading>{t("partial_pay_pay_outstanding_balance")}</s-heading>
+            <s-badge tone={allFailed ? "critical" : "neutral"} color="subdued">
+              {badgeLabel}
+            </s-badge>
+          </s-stack>
+          <s-divider></s-divider>
 
-          {failed.length > 0 && (
-            <s-stack direction="block" gap="tight">
-              {allFailed && (
-                <s-banner status="critical">
-                  <s-text>{t("overallPaymentError")}</s-text>
-                </s-banner>
-              )}
-              <s-text>{t("failedLabel")}</s-text>
-              {failed.slice(0, 10).map((r) => (
-                <s-text key={r.orderId}>
-                  {t("failedItem", { name: r.name, error: friendlyError(r.error) })}
-                </s-text>
-              ))}
-              {failed.length > 10 && (
-                <s-text>{t("andMore", { count: failed.length - 10 })}</s-text>
-              )}
-            </s-stack>
+          {allSuccess ? (
+            <s-banner tone="success">
+              <s-text>{t("partial_pay_paid_successfully", { amount: formatCode(successTotal) })}</s-text>
+            </s-banner>
+          ) : allFailed ? (
+            <s-banner tone="critical">
+              <s-text>{t("partial_pay_overall_error")}</s-text>
+            </s-banner>
+          ) : (
+            <s-banner tone="warning">
+              <s-text>
+                {t("partial_pay_partial_summary", {
+                  paid: formatCode(successTotal),
+                  failed: formatCode(failedTotal),
+                })}
+              </s-text>
+            </s-banner>
           )}
 
-          {succeeded.length > 0 && succeeded.length <= 10 && (
-            <s-stack direction="block" gap="tight">
-              {succeeded.map((r) => (
-                <s-text key={r.orderId}>
-                  {t("succeededItem", { name: r.name, amount: formatMoney(r.applied) })}
-                  {r.remainingOutstanding && parseFloat(r.remainingOutstanding) > 0
-                    ? ` — ${t("remainingOnOrder", { amount: formatMoney(r.remainingOutstanding) })}`
-                    : ` — ${t("fullyPaid")}`}
-                </s-text>
-              ))}
-            </s-stack>
+          <s-text type="small" color="subdued">{t("partial_pay_orders_label")}</s-text>
+          {results.slice(0, 10).map((r) => (
+            <s-box key={r.orderId} padding="base" background="subdued" borderRadius="base">
+              <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+                <s-stack direction="block" gap="small-100">
+                  <s-text type="strong">{r.name}</s-text>
+                  {r.status === "success" && (
+                    <s-stack direction="inline" gap="small-100" alignItems="center">
+                      <s-icon type="check-circle" tone="success" size="small"></s-icon>
+                      <s-text tone="success">
+                        {t("partial_pay_order_paid", { amount: formatCode(r.applied) })}
+                      </s-text>
+                    </s-stack>
+                  )}
+                  {r.status === "failed" && (
+                    <s-text tone="critical">{friendlyError(r.error, t)}</s-text>
+                  )}
+                  {r.status === "pending" && (
+                    <s-text color="subdued">{t("partial_pay_order_pending")}</s-text>
+                  )}
+                </s-stack>
+                <s-text type="strong">{formatCode(r.applied)}</s-text>
+              </s-grid>
+            </s-box>
+          ))}
+          {results.length > 10 && (
+            <s-text color="subdued">{t("partial_pay_and_more", { count: results.length - 10 })}</s-text>
           )}
 
-          <s-grid gridTemplateColumns={failed.length > 0 ? "1fr auto auto" : "1fr auto"} gap="base">
-            <s-grid-item />
+          <s-divider></s-divider>
+          {allSuccess && (
+            <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+              <s-text color="subdued">{t("partial_pay_paid_label")}</s-text>
+              <s-heading>{formatCode(successTotal)}</s-heading>
+            </s-grid>
+          )}
+
+          <s-stack direction="inline" gap="base">
             {failed.length > 0 && (
-              <s-grid-item>
-                <s-button onClick={handleRetry}>
-                  {allFailed ? t("retry") : t("retryFailed")}
-                </s-button>
-              </s-grid-item>
-            )}
-            <s-grid-item>
-              <s-button variant="primary" onClick={handleCollapse}>
-                {t("done")}
+              <s-button variant="primary" onClick={handleRetry}>
+                {allFailed ? t("partial_pay_retry") : t("partial_pay_retry_failed")}
               </s-button>
-            </s-grid-item>
-          </s-grid>
+            )}
+            <s-button
+              variant={failed.length > 0 ? "secondary" : "primary"}
+              onClick={handleCollapse}
+            >
+              {t("partial_pay_done")}
+            </s-button>
+          </s-stack>
         </s-stack>
       </s-section>
     );
@@ -325,31 +371,29 @@ function BalanceBlock() {
 
   // Expanded — payment form
   const validMethods = (info.paymentMethods || []).filter((m) => !m.expired);
+  const overdue = parseFloat(info.overdueOutstanding) > 0;
 
   return (
     <s-section>
-      <s-heading>{t("payOutstandingBalance")}</s-heading>
-
       <s-stack direction="block" gap="base">
-        <s-text>
-          {info.orders.length === 1
-            ? t("totalOutstandingAcross", { amount: formatMoney(info.totalOutstanding), count: info.orders.length })
-            : t("totalOutstandingAcrossPlural", { amount: formatMoney(info.totalOutstanding), count: info.orders.length })}
-          {parseFloat(info.overdueOutstanding) > 0
-            ? ` ${t("overdueParenthetical", { amount: formatMoney(info.overdueOutstanding) })}`
-            : ""}
-        </s-text>
+        <s-stack direction="inline" gap="base" alignItems="center">
+          <s-heading>{t("partial_pay_pay_outstanding_balance")}</s-heading>
+          {overdue && (
+            <s-badge tone="critical" color="subdued">{t("partial_pay_badge_overdue")}</s-badge>
+          )}
+        </s-stack>
+        <s-divider></s-divider>
 
         {validMethods.length > 1 && (
           <s-select
-            label={t("paymentMethod")}
+            label={t("partial_pay_payment_method")}
             value={paymentMethodId}
             onChange={(e) => setPaymentMethodId(e.target.value)}
             disabled={submitting}
           >
             {validMethods.map((m) => (
               <s-option key={m.fingerprint || m.id} value={m.fingerprint || m.id}>
-                {t("cardSelectOption", {
+                {t("partial_pay_card_select_option", {
                   brand: m.brand,
                   digits: m.lastDigits,
                   name: m.name,
@@ -362,23 +406,28 @@ function BalanceBlock() {
         )}
 
         {validMethods.length === 1 && (
-          <s-text>
-            {t("cardDisplay", {
-              brand: validMethods[0].brand,
-              digits: validMethods[0].lastDigits,
-              name: validMethods[0].name,
-            })}
-          </s-text>
+          <s-box padding="base" border="base" borderRadius="base">
+            <s-stack direction="block" gap="small-100">
+              <s-text type="small" color="subdued">{t("partial_pay_payment_method")}</s-text>
+              <s-text type="strong">
+                {t("partial_pay_card_display", {
+                  brand: validMethods[0].brand,
+                  digits: validMethods[0].lastDigits,
+                  name: validMethods[0].name,
+                })}
+              </s-text>
+            </s-stack>
+          </s-box>
         )}
 
         {validMethods.length === 0 && (
-          <s-banner status="critical">
-            <s-text>{t("noPaymentMethods")}</s-text>
+          <s-banner tone="critical">
+            <s-text>{t("partial_pay_no_payment_methods")}</s-text>
           </s-banner>
         )}
 
         <s-text-field
-          label={t("amountToPay")}
+          label={t("partial_pay_amount_to_pay")}
           value={amount}
           onInput={(e) => {
             const v = e.target.value;
@@ -393,49 +442,87 @@ function BalanceBlock() {
           disabled={submitting}
         />
 
+        <s-stack direction="inline" gap="small" alignItems="center">
+          <s-text color="subdued">
+            {t("partial_pay_max_payable", { amount: formatCode(info.totalOutstanding) })}
+          </s-text>
+          {overdue && (
+            <s-text tone="critical">
+              {t("partial_pay_overdue_separated", { amount: formatCode(info.overdueOutstanding) })}
+            </s-text>
+          )}
+        </s-stack>
+
         {allocations.length > 0 && (
-          <s-stack direction="block" gap="tight">
-            <s-text>{t("allocationLabel", { count: allocations.length })}</s-text>
-            {allocations.slice(0, 5).map((a) => (
-              <s-text key={a.orderId}>
-                {parseFloat(a.remainingOnOrder) > 0
-                  ? t("allocationItemWithRemaining", {
-                      amount: formatMoney(a.applied),
-                      name: a.name,
-                      remaining: formatMoney(a.remainingOnOrder),
-                    })
-                  : t("allocationItem", { amount: formatMoney(a.applied), name: a.name })}
+          <s-stack direction="block" gap="small">
+            <s-text type="small" color="subdued">{t("partial_pay_orders_label")}</s-text>
+            {allocations.slice(0, 10).map((a) => {
+              const partial = parseFloat(a.remainingOnOrder) > 0;
+              const orderTotal = (
+                parseFloat(a.applied) + parseFloat(a.remainingOnOrder)
+              ).toFixed(2);
+              return (
+                <s-box key={a.orderId} padding="base" background="subdued" borderRadius="base">
+                  <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+                    <s-stack direction="block" gap="small-100">
+                      <s-text type="strong">{a.name}</s-text>
+                      {partial ? (
+                        <s-text tone="warning">
+                          {t("partial_pay_allocated_with_remaining", {
+                            allocated: formatCode(a.applied),
+                            remaining: formatCode(a.remainingOnOrder),
+                          })}
+                        </s-text>
+                      ) : (
+                        <s-text color="subdued">
+                          {t("partial_pay_allocated_full", { allocated: formatCode(a.applied) })}
+                        </s-text>
+                      )}
+                    </s-stack>
+                    <s-text type="strong">{formatCode(orderTotal)}</s-text>
+                  </s-grid>
+                </s-box>
+              );
+            })}
+            {allocations.length > 10 && (
+              <s-text color="subdued">
+                {t("partial_pay_and_more_orders", { count: allocations.length - 10 })}
               </s-text>
-            ))}
-            {allocations.length > 5 && (
-              <s-text>{t("andMoreOrders", { count: allocations.length - 5 })}</s-text>
             )}
           </s-stack>
         )}
 
+        <s-divider></s-divider>
+        <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
+          <s-text color="subdued">{t("partial_pay_total")}</s-text>
+          <s-heading>{formatCode(amount || "0.00")}</s-heading>
+        </s-grid>
+
         {error && (
-          <s-banner status="critical">
+          <s-banner tone="critical">
             <s-text>{error}</s-text>
           </s-banner>
         )}
 
         {submitting && (
-          <s-banner status="warning">
-            <s-text>{t("processingPayment")}</s-text>
+          <s-banner tone="info">
+            <s-text>{t("partial_pay_processing_payment")}</s-text>
           </s-banner>
         )}
 
         <s-stack direction="inline" gap="base">
-          <s-button onClick={handleCancel} disabled={submitting}>
-            {t("notNow")}
-          </s-button>
           <s-button
             variant="primary"
             onClick={handleSubmit}
             loading={submitting}
             disabled={submitting || !amount || !paymentMethodId}
           >
-            {t("payAmount", { amount: formatMoney(amount || "0.00") })}
+            {submitting
+              ? t("partial_pay_processing")
+              : t("partial_pay_pay_amount", { amount: formatCode(amount || "0.00") })}
+          </s-button>
+          <s-button onClick={handleCancel} disabled={submitting}>
+            {t("partial_pay_not_now")}
           </s-button>
         </s-stack>
       </s-stack>

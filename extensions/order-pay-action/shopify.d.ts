@@ -11,3 +11,11 @@ declare module './src/BalanceBlock.jsx' {
   const shopify: import('@shopify/ui-extensions/customer-account.order-index.block.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
+
+//@ts-ignore
+declare module './src/translations.js' {
+  const shopify:
+    | import('@shopify/ui-extensions/customer-account.order-status.block.render').Api
+    | import('@shopify/ui-extensions/customer-account.order-index.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
