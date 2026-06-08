@@ -13,6 +13,9 @@ import { authenticate, unauthenticated } from "../shopify.server";
  */
 
 const METAOBJECT_TYPE = "rep_dashboard_translations";
+// The metaobject is shared across rep-facing apps; this extension only needs its
+// own namespace, so we filter to it (smaller payload + fewer translation queries).
+const KEY_PREFIX = "partial_pay_";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map(); // `${shop}:${locale}` -> { at, data }
 
@@ -45,38 +48,53 @@ export async function action({ request }) {
 
     const { admin } = await unauthenticated.admin(shopDomain);
 
-    // Base entries (always English)
-    const baseResp = await admin.graphql(
-      `#graphql
-      query GetTranslations {
-        metaobjects(type: "${METAOBJECT_TYPE}", first: 250) {
-          edges { node { id fields { key value } } }
-        }
-        shop { currencyCode }
-      }`,
-    );
-    const baseData = await baseResp.json();
-    const edges = baseData?.data?.metaobjects?.edges || [];
-    const currencyCode = baseData?.data?.shop?.currencyCode || "USD";
+    // Page through all entries — the metaobject is shared with the rep dashboard
+    // (~200 entries already), so a single first:250 page would soon truncate ours.
+    const nodes = [];
+    let currencyCode = "USD";
+    let cursor = null;
+    let hasNextPage = true;
+    while (hasNextPage) {
+      const baseResp = await admin.graphql(
+        `#graphql
+        query GetTranslations($cursor: String) {
+          metaobjects(type: "${METAOBJECT_TYPE}", first: 250, after: $cursor) {
+            edges { cursor node { id fields { key value } } }
+            pageInfo { hasNextPage }
+          }
+          shop { currencyCode }
+        }`,
+        { variables: { cursor } },
+      );
+      const baseData = await baseResp.json();
+      const conn = baseData?.data?.metaobjects;
+      currencyCode = baseData?.data?.shop?.currencyCode || currencyCode;
+      const edges = conn?.edges || [];
+      for (const e of edges) nodes.push(e.node);
+      hasNextPage = conn?.pageInfo?.hasNextPage || false;
+      cursor = edges.length ? edges[edges.length - 1].cursor : null;
+      if (!cursor) hasNextPage = false;
+    }
 
+    // Build the base (English) map, keeping only this extension's namespace.
     const translations = {};
     const idToKey = {};
-    for (const edge of edges) {
+    for (const node of nodes) {
       let tKey = "";
       let tValue = "";
-      for (const f of edge.node.fields || []) {
+      for (const f of node.fields || []) {
         if (f.key === "key") tKey = f.value;
         if (f.key === "value") tValue = f.value;
       }
-      if (tKey) {
+      if (tKey.startsWith(KEY_PREFIX)) {
         translations[tKey] = tValue;
-        idToKey[edge.node.id] = tKey;
+        idToKey[node.id] = tKey;
       }
     }
 
-    // Overlay locale translations of the "value" field
-    if (locale && edges.length > 0) {
-      const resourceIds = edges.map((e) => e.node.id);
+    // Overlay locale translations of the "value" field (our entries only)
+    if (locale) {
+      const resourceIds = Object.keys(idToKey);
       for (let i = 0; i < resourceIds.length; i += 50) {
         const batch = resourceIds.slice(i, i + 50);
         const transResp = await admin.graphql(
