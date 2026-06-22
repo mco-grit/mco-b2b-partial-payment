@@ -79,15 +79,10 @@ function BalanceBlock() {
       setInfo(data);
       const validMethod = (data.paymentMethods || []).find((m) => !m.expired);
       if (validMethod) setPaymentMethodId(validMethod.fingerprint || validMethod.id);
-      // Pre-fill with overdue balance if > 0, otherwise total outstanding
-      const overdue = parseFloat(data.overdueOutstanding);
-      if (overdue > 0) {
-        setAmount(data.overdueOutstanding);
-      } else if (parseFloat(data.totalOutstanding) > 0) {
-        setAmount(data.totalOutstanding);
-      } else {
-        setAmount("");
-      }
+      // Pre-fill with the full outstanding balance so all open orders are
+      // covered by default (overdue is surfaced separately as a warning).
+      const total = parseFloat(data.totalOutstanding);
+      setAmount(total > 0 ? data.totalOutstanding : "");
     } catch (e) {
       setError(t("partial_pay_failed_to_load_balance"));
     } finally {
