@@ -18,6 +18,7 @@
   "partial_pay_orders_label": "COMMANDES",
   "partial_pay_allocated_full": "[allocated] alloué",
   "partial_pay_allocated_with_remaining": "[allocated] alloué · [remaining] restant",
+  "partial_pay_not_included": "[amount] non inclus",
   "partial_pay_and_more_orders": "...et [count] commandes de plus",
   "partial_pay_total": "Total",
   "partial_pay_pay_amount": "Payer [amount]",

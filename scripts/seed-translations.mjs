@@ -38,7 +38,7 @@ if (!SHOP || !TOKEN) {
   process.exit(1);
 }
 
-// --- The 57 partial-payment strings. [bracket] placeholders match the existing
+// --- The partial-payment strings. [bracket] placeholders match the existing
 // Rep Dashboard convention. handle is derived from key (underscores -> hyphens).
 const ENTRIES = [
   // Balance summary
@@ -62,6 +62,7 @@ const ENTRIES = [
   ["partial_pay_orders_label", "ORDERS"],
   ["partial_pay_allocated_full", "[allocated] allocated"],
   ["partial_pay_allocated_with_remaining", "[allocated] allocated · [remaining] remaining"],
+  ["partial_pay_not_included", "[amount] not included"],
   ["partial_pay_and_more_orders", "…and [count] more orders"],
   ["partial_pay_total", "Total"],
   ["partial_pay_pay_amount", "Pay [amount]"],

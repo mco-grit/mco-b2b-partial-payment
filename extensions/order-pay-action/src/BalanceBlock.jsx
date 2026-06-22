@@ -26,22 +26,20 @@ function friendlyError(raw, t) {
 function allocate(orders, requestedAmount) {
   const total = orders.reduce((s, o) => s + parseFloat(o.outstanding), 0);
   let remaining = Math.min(requestedAmount, total);
-  const allocations = [];
-  for (const o of orders) {
-    if (remaining <= 0.0001) break;
+  // Return an entry for EVERY open order so the rep always sees the full list.
+  // Orders the amount doesn't reach get applied: 0 ("not included") rather than
+  // being dropped silently — that silent drop was the GRIT-5662 bug.
+  return orders.map((o) => {
     const out = parseFloat(o.outstanding);
-    const applied = Math.min(out, remaining);
-    if (applied > 0) {
-      allocations.push({
-        orderId: o.id,
-        name: o.name,
-        applied: applied.toFixed(2),
-        remainingOnOrder: (out - applied).toFixed(2),
-      });
-      remaining -= applied;
-    }
-  }
-  return allocations;
+    const applied = remaining > 0.0001 ? Math.min(out, remaining) : 0;
+    remaining -= applied;
+    return {
+      orderId: o.id,
+      name: o.name,
+      applied: applied.toFixed(2),
+      remainingOnOrder: (out - applied).toFixed(2),
+    };
+  });
 }
 
 function BalanceBlock() {
@@ -452,25 +450,32 @@ function BalanceBlock() {
           <s-stack direction="block" gap="small">
             <s-text type="small" color="subdued">{t("partial_pay_orders_label")}</s-text>
             {allocations.slice(0, 10).map((a) => {
-              const partial = parseFloat(a.remainingOnOrder) > 0;
-              const orderTotal = (
-                parseFloat(a.applied) + parseFloat(a.remainingOnOrder)
-              ).toFixed(2);
+              const applied = parseFloat(a.applied);
+              const remaining = parseFloat(a.remainingOnOrder);
+              const orderTotal = (applied + remaining).toFixed(2);
+              // none = not reached by the entered amount, partial = part-paid, full = covered
+              const status = applied <= 0 ? "none" : remaining > 0 ? "partial" : "full";
               return (
                 <s-box key={a.orderId} padding="base" background="subdued" borderRadius="base">
                   <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
                     <s-stack direction="block" gap="small-100">
                       <s-text type="strong">{a.name}</s-text>
-                      {partial ? (
+                      {status === "full" && (
+                        <s-text color="subdued">
+                          {t("partial_pay_allocated_full", { allocated: formatCode(a.applied) })}
+                        </s-text>
+                      )}
+                      {status === "partial" && (
                         <s-text tone="warning">
                           {t("partial_pay_allocated_with_remaining", {
                             allocated: formatCode(a.applied),
                             remaining: formatCode(a.remainingOnOrder),
                           })}
                         </s-text>
-                      ) : (
-                        <s-text color="subdued">
-                          {t("partial_pay_allocated_full", { allocated: formatCode(a.applied) })}
+                      )}
+                      {status === "none" && (
+                        <s-text tone="warning">
+                          {t("partial_pay_not_included", { amount: formatCode(a.remainingOnOrder) })}
                         </s-text>
                       )}
                     </s-stack>
