@@ -184,6 +184,11 @@ function ActionExtension() {
     return null;
   }
 
+  // COD orders are paid on delivery — hide the partial payment UI entirely (GRIT-5699)
+  if (orderInfo && orderInfo.isCod) {
+    return null;
+  }
+
   if (status === "success") {
     return (
       <s-stack direction="block" gap="base">

@@ -1,4 +1,5 @@
 import { authenticate, unauthenticated } from "../shopify.server";
+import { isCodOrder } from "../utils/cod";
 
 export async function action({ request }) {
   if (request.method !== "POST") {
@@ -44,6 +45,9 @@ export async function action({ request }) {
             id
             name
             displayFinancialStatus
+            paymentTerms {
+              paymentTermsType
+            }
             totalOutstandingSet {
               presentmentMoney {
                 amount
@@ -124,12 +128,24 @@ export async function action({ request }) {
           financialStatus: order.displayFinancialStatus,
           outstandingAmount: outstandingMoney?.amount || "0",
           currencyCode: outstandingMoney?.currencyCode || "",
+          // COD orders are paid on delivery; the frontend hides the payment UI — GRIT-5699
+          isCod: isCodOrder(order),
           paymentMethods,
         },
       }, 200, corsHeaders);
     }
 
     // --- PAY ---
+    // Guard against paying COD orders (paid on delivery) even if the button was
+    // somehow reached — defense-in-depth behind the hidden UI — GRIT-5699
+    if (isCodOrder(order)) {
+      return jsonResponse(
+        { error: "Cash on Delivery orders cannot be paid here; payment is collected on delivery" },
+        400,
+        corsHeaders,
+      );
+    }
+
     const { amount, currencyCode, mandateId: selectedMandateId } = body;
 
     if (!amount || !currencyCode) {

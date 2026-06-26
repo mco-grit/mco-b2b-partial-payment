@@ -1,4 +1,5 @@
 import { authenticate, unauthenticated } from "../shopify.server";
+import { isCodOrder } from "../utils/cod";
 
 export async function action({ request }) {
   if (request.method !== "POST") {
@@ -275,6 +276,7 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
                 displayFinancialStatus
                 totalOutstandingSet { presentmentMoney { amount currencyCode } }
                 paymentTerms {
+                  paymentTermsType
                   paymentSchedules(first: 1) {
                     nodes { dueAt }
                   }
@@ -326,6 +328,9 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
 
   const rawOrders = allNodes
     .filter((o) => parseFloat(o.totalOutstandingSet?.presentmentMoney?.amount || "0") > 0)
+    // Exclude COD orders: they are paid on delivery, so they must not count
+    // toward the balance owed or be included in payment allocation — GRIT-5699
+    .filter((o) => !isCodOrder(o))
     .map((o) => {
       const outstanding = o.totalOutstandingSet.presentmentMoney.amount;
       // Use the order's presentment currency (what the buyer owes, e.g. CZK/EUR),
