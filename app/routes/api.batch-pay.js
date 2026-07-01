@@ -274,9 +274,9 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
                 name
                 processedAt
                 displayFinancialStatus
+                paymentGatewayNames
                 totalOutstandingSet { presentmentMoney { amount currencyCode } }
                 paymentTerms {
-                  paymentTermsType
                   paymentSchedules(first: 1) {
                     nodes { dueAt }
                   }

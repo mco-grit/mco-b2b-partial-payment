@@ -45,9 +45,7 @@ export async function action({ request }) {
             id
             name
             displayFinancialStatus
-            paymentTerms {
-              paymentTermsType
-            }
+            paymentGatewayNames
             totalOutstandingSet {
               presentmentMoney {
                 amount
