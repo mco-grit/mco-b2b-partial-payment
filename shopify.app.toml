@@ -6,7 +6,10 @@ application_url = "https://mco-b2b-partial-payment.onrender.com"
 embedded = true
 
 [build]
-automatically_update_urls_on_dev = true
+# Guardrail: keep FALSE on the production config so `shopify app dev` can never
+# rewrite the live app's URLs to a temporary tunnel. Dev work runs on the
+# deployed dev service (shopify.app.dev.toml); prod is switched to deliberately.
+automatically_update_urls_on_dev = false
 
 [webhooks]
 api_version = "2026-04"
