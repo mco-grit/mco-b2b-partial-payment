@@ -1,0 +1,56 @@
+# Render Blueprint — DEVELOPMENT / STAGING service (b2b-partial-pay)
+# ─────────────────────────────────────────────────────────────────────────────
+# Runs the SAME codebase as production, but the "b2b-partial-pay (Dev)" Shopify
+# app (client_id 1df03e4e…) is pointed at the avon-dev staging store and a
+# SEPARATE dev Postgres DB — so dev work never touches prod (avon-prod + prod DB).
+# Auto-deploys from the `develop` branch. Sessions are stored in Postgres
+# (PrismaSessionStorage), so OAuth install writes the session to the dev DB —
+# there is NO access-token env var to set.
+#
+# Prod is configured in the Render dashboard (no blueprint). This file manages
+# only the dev service + dev DB. Use it: Render → New → Blueprint → this repo.
+#
+# ⚠️ VERIFY AGAINST PROD before relying on this — match prod's plan/region and
+#    confirm prod's runtime (this assumes Node; the Dockerfile is an alternative).
+databases:
+  - name: mco-b2b-partial-payment-db-dev
+    databaseName: mco_b2b_partial_payment_dev
+    user: mco_b2b_dev_user
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: mco-b2b-partial-payment-dev        # → https://mco-b2b-partial-payment-dev.onrender.com
+    runtime: node
+    region: oregon
+    plan: free                               # ← match prod's plan
+    branch: develop
+    autoDeploy: true
+    # npm ci works (package-lock.json IS committed). --include=dev guarantees the
+    # build tools (vite / @react-router/dev). prisma generate before the build;
+    # migrations run at startup via `docker-start` (setup = generate + migrate deploy).
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    startCommand: npm run docker-start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"                          # Dockerfile uses node:20; engines >=20.19
+      - key: NODE_ENV
+        value: production
+      # ── Dev database (the DB-isolation boundary) ─────────────────────────────
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mco-b2b-partial-payment-db-dev
+          property: connectionString
+      # ── Which store this service reads/writes ────────────────────────────────
+      - key: SHOPIFY_APP_URL
+        value: https://mco-b2b-partial-payment-dev.onrender.com
+      # SHOPIFY_API_KEY == the Dev app's client_id (public, safe to commit)
+      - key: SHOPIFY_API_KEY
+        value: "1df03e4e7fea7a203011bc27e8575877"
+      # SCOPES is read from env here (process.env.SCOPES) — keep identical to prod.
+      - key: SCOPES
+        value: "write_products,read_orders,write_orders,read_payment_mandate,write_payment_mandate,read_customers,write_customers,read_payment_terms,read_metaobjects,read_translations"
+      # ── Secret: set in the Render dashboard, never in git ────────────────────
+      - key: SHOPIFY_API_SECRET                # Dev app's client secret (Partners → API credentials)
+        sync: false

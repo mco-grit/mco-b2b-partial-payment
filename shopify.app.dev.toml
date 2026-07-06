@@ -1,0 +1,38 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+#
+# DEVELOPMENT / STAGING config for the "b2b-partial-pay (Dev)" app.
+# Deployed dev service on Render, pointed at the avon-dev staging store + a
+# SEPARATE dev Postgres DB, so dev work never touches prod (avon-prod).
+# Switch to it with `npm run deploy:dev`. Everything below the app identity is
+# kept IDENTICAL to shopify.app.toml (prod) so both apps share one scope +
+# webhook config.
+
+client_id = "1df03e4e7fea7a203011bc27e8575877"
+name = "b2b-partial-pay (Dev)"
+application_url = "https://mco-b2b-partial-payment-dev.onrender.com"
+embedded = true
+
+# FALSE: this env is the DEPLOYED dev service on Render, not a local tunnel — so
+# the dev app's URLs stay pinned to the Render dev URL above. include_config_on_deploy
+# keeps scopes/webhooks/URLs in sync on every `shopify app deploy`.
+[build]
+automatically_update_urls_on_dev = false
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products,read_orders,write_orders,read_payment_mandate,write_payment_mandate,read_customers,write_customers,read_payment_terms,read_metaobjects,read_translations"
+
+[auth]
+redirect_urls = [ "https://mco-b2b-partial-payment-dev.onrender.com/api/auth" ]
