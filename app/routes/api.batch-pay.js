@@ -1,5 +1,6 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import { isCodOrder } from "../utils/cod";
+import { isUnfulfilledOrder } from "../utils/fulfillment";
 
 export async function action({ request }) {
   if (request.method !== "POST") {
@@ -274,6 +275,7 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
                 name
                 processedAt
                 displayFinancialStatus
+                displayFulfillmentStatus
                 paymentGatewayNames
                 totalOutstandingSet { presentmentMoney { amount currencyCode } }
                 paymentTerms {
@@ -328,9 +330,11 @@ async function fetchOpenOrdersAndMethods(admin, locationInfo) {
 
   const rawOrders = allNodes
     .filter((o) => parseFloat(o.totalOutstandingSet?.presentmentMoney?.amount || "0") > 0)
-    // Exclude COD orders: they are paid on delivery, so they must not count
-    // toward the balance owed or be included in payment allocation — GRIT-5699
-    .filter((o) => !isCodOrder(o))
+    // Exclude orders not eligible for partial payments so they don't count toward
+    // the balance owed or get included in payment allocation:
+    //  - COD: paid on delivery (GRIT-5699)
+    //  - unfulfilled: goods not shipped yet
+    .filter((o) => !isCodOrder(o) && !isUnfulfilledOrder(o))
     .map((o) => {
       const outstanding = o.totalOutstandingSet.presentmentMoney.amount;
       // Use the order's presentment currency (what the buyer owes, e.g. CZK/EUR),

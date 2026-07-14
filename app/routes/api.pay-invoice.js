@@ -1,5 +1,6 @@
 import { authenticate, unauthenticated } from "../shopify.server";
 import { isCodOrder } from "../utils/cod";
+import { isUnfulfilledOrder } from "../utils/fulfillment";
 
 export async function action({ request }) {
   if (request.method !== "POST") {
@@ -45,6 +46,7 @@ export async function action({ request }) {
             id
             name
             displayFinancialStatus
+            displayFulfillmentStatus
             paymentGatewayNames
             totalOutstandingSet {
               presentmentMoney {
@@ -126,19 +128,28 @@ export async function action({ request }) {
           financialStatus: order.displayFinancialStatus,
           outstandingAmount: outstandingMoney?.amount || "0",
           currencyCode: outstandingMoney?.currencyCode || "",
-          // COD orders are paid on delivery; the frontend hides the payment UI — GRIT-5699
+          // Orders not payable via partial payments; the frontend hides the payment UI.
+          // COD = paid on delivery (GRIT-5699); unfulfilled = goods not shipped yet.
           isCod: isCodOrder(order),
+          isUnfulfilled: isUnfulfilledOrder(order),
           paymentMethods,
         },
       }, 200, corsHeaders);
     }
 
     // --- PAY ---
-    // Guard against paying COD orders (paid on delivery) even if the button was
-    // somehow reached — defense-in-depth behind the hidden UI — GRIT-5699
+    // Guard against paying orders that aren't eligible for partial payments even if
+    // the button was somehow reached — defense-in-depth behind the hidden UI.
     if (isCodOrder(order)) {
       return jsonResponse(
         { error: "Cash on Delivery orders cannot be paid here; payment is collected on delivery" },
+        400,
+        corsHeaders,
+      );
+    }
+    if (isUnfulfilledOrder(order)) {
+      return jsonResponse(
+        { error: "Unfulfilled orders cannot be paid here until they are fulfilled" },
         400,
         corsHeaders,
       );
