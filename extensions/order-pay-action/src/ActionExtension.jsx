@@ -184,8 +184,10 @@ function ActionExtension() {
     return null;
   }
 
-  // COD orders are paid on delivery — hide the partial payment UI entirely (GRIT-5699)
-  if (orderInfo && orderInfo.isCod) {
+  // Hide the partial payment UI for orders that aren't eligible:
+  //  - COD orders are paid on delivery (GRIT-5699)
+  //  - unfulfilled orders can't be paid until goods are shipped
+  if (orderInfo && (orderInfo.isCod || orderInfo.isUnfulfilled)) {
     return null;
   }
 
